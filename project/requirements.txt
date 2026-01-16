@@ -1,0 +1,4 @@
+aiogram==3.10.0
+flask==2.3.3
+mysql-connector-python==9.1.0
+python-dotenv==1.0.0

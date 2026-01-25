@@ -1,4 +1,3 @@
-# db.py
 import mysql.connector
 from mysql.connector import Error
 import os
@@ -34,455 +33,264 @@ class Database:
             return None
         
         cursor = conn.cursor(dictionary=True)
-        
-        # Проверяем существует ли
-        cursor.execute("SELECT * FROM students WHERE telegram_user_id = %s", (telegram_user_id,))
-        student = cursor.fetchone()
-        
-        if student:
-            cursor.close()
-            conn.close()
-            return student
-        
-        # Создаём нового
-        student_uuid = str(uuid.uuid4())
-        student_id = f"STU{telegram_user_id}"  # Уникальный студенческий ID
-        
-        cursor.execute("""
-            INSERT INTO students (id, telegram_user_id, student_id, last_name, first_name, email)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (student_uuid, telegram_user_id, student_id, last_name, first_name, f"{username}@telegram.user"))
-        
-        # Создаём баланс
-        cursor.execute("""
-            INSERT INTO balances (student_id, current_points, total_earned, total_spent)
-            VALUES (%s, 0, 0, 0)
-        """, (student_uuid,))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return self.get_or_create_student(telegram_user_id, first_name, last_name, username)
-    
-    # ==================== БАЛАНС ====================
-    def get_balance(self, telegram_user_id):
-        """Получить баланс студента"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT b.current_points, b.total_earned, b.total_spent, r.position as `rank`
-            FROM students s
-            LEFT JOIN balances b ON s.id = b.student_id
-            LEFT JOIN ranking r ON s.id = r.student_id
-            WHERE s.telegram_user_id = %s
-        """, (telegram_user_id,))
-        
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if not result:
-            return {"current": 0, "total_earned": 0, "total_spent": 0, "rank": 999}
-        
-        return {
-            "current": result['current_points'] or 0,
-            "total_earned": result['total_earned'] or 0,
-            "total_spent": result['total_spent'] or 0,
-            "rank": result['rank'] or 999
-        }
-
-    
-    # ==================== ТРАНЗАКЦИИ ====================
-    
-    def add_transaction(self, telegram_user_id, tx_type, amount, description, entity_type=None, entity_id=None):
-        """Добавить транзакцию и обновить баланс"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        # Получаем ID студента
-        cursor.execute("SELECT id FROM students WHERE telegram_user_id = %s", (telegram_user_id,))
-        student = cursor.fetchone()
-        if not student:
-            cursor.close()
-            conn.close()
-            return False
-        
-        student_id = student['id']
-        tx_uuid = str(uuid.uuid4())
-        
-        # Добавляем транзакцию
-        cursor.execute("""
-            INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'completed')
-        """, (tx_uuid, student_id, tx_type, amount, description, entity_type, entity_id))
-        
-        # Обновляем баланс
-        if tx_type == 'earn':
-            cursor.execute("""
-                UPDATE balances 
-                SET current_points = current_points + %s, 
-                    total_earned = total_earned + %s 
-                WHERE student_id = %s
-            """, (amount, amount, student_id))
-        elif tx_type == 'spend':
-            cursor.execute("""
-                UPDATE balances 
-                SET current_points = current_points - %s, 
-                    total_spent = total_spent + %s 
-                WHERE student_id = %s
-            """, (amount, amount, student_id))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return True
-    
-    def get_transactions(self, telegram_user_id, limit=50):
-        """Получить историю транзакций"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT t.type, t.amount, t.description, t.created_at, t.status
-            FROM transactions t
-            JOIN students s ON t.student_id = s.id
-            WHERE s.telegram_user_id = %s
-            ORDER BY t.created_at DESC
-            LIMIT %s
-        """, (telegram_user_id, limit))
-        
-        transactions = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        # Форматируем для фронтенда
-        result = []
-        for tx in transactions:
-            result.append({
-                "type": tx['type'],
-                "amount": tx['amount'],
-                "description": tx['description'],
-                "date": tx['created_at'].strftime('%Y-%m-%d %H:%M'),
-                "status": tx['status']
-            })
-        
-        return result
-    
-    # ==================== РЕЙТИНГ ====================
-    
-    def get_ranking(self, limit=10):
-        """Топ студентов по баллам"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT s.first_name, s.last_name, b.current_points, r.position
-            FROM students s
-            JOIN balances b ON s.id = b.student_id
-            LEFT JOIN ranking r ON s.id = r.student_id
-            ORDER BY b.current_points DESC
-            LIMIT %s
-        """, (limit,))
-        
-        ranking = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        result = []
-        for idx, item in enumerate(ranking, 1):
-            result.append({
-                "rank": item['position'] or idx,
-                "name": f"{item['first_name']} {item['last_name']}",
-                "points": item['current_points']
-            })
-        
-        return result
-    
-    # ==================== МЕРЧ ====================
-    
-    def get_merch(self):
-        """Получить список мерча"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("SELECT * FROM merch WHERE stock > 0 ORDER BY created_at DESC")
-        merch = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        result = []
-        for item in merch:
-            result.append({
-                "id": item['id'],
-                "name": item['name'],
-                "price": item['price_points'],
-                "stock": item['stock'],
-                "image": "🎁",  # можно брать из item['image_url']
-                "description": item['description']
-            })
-        
-        return result
-    
-    def buy_merch(self, telegram_user_id, merch_id, quantity=1):
-        """Купить мерч"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        # Проверяем наличие и цену
-        cursor.execute("SELECT name, price_points, stock FROM merch WHERE id = %s", (merch_id,))
-        merch = cursor.fetchone()
-        
-        if not merch or merch['stock'] < quantity:
-            cursor.close()
-            conn.close()
-            return False, "Товар закончился"
-        
-        # Проверяем баланс
-        cursor.execute("""
-            SELECT b.current_points, s.id as student_id
-            FROM students s
-            JOIN balances b ON s.id = b.student_id
-            WHERE s.telegram_user_id = %s
-        """, (telegram_user_id,))
-        student = cursor.fetchone()
-        
-        total_price = merch['price_points'] * quantity
-        
-        if not student or student['current_points'] < total_price:
-            cursor.close()
-            conn.close()
-            return False, "Недостаточно баллов"
-        
-        # Создаём заказ
-        order_uuid = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO merch_orders (id, merch_id, buyer_id, quantity, status)
-            VALUES (%s, %s, %s, %s, 'paid')
-        """, (order_uuid, merch_id, student['student_id'], quantity))
-        
-        # Уменьшаем stock
-        cursor.execute("UPDATE merch SET stock = stock - %s WHERE id = %s", (quantity, merch_id))
-        
-        # Добавляем транзакцию
-        cursor.execute("""
-            INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id, status)
-            VALUES (%s, %s, 'spend', %s, %s, 'merch_order', %s, 'completed')
-        """, (str(uuid.uuid4()), student['student_id'], total_price, f"Купил {merch['name']}", order_uuid))
-        
-        # Обновляем баланс
-        cursor.execute("""
-            UPDATE balances 
-            SET current_points = current_points - %s, 
-                total_spent = total_spent + %s 
-            WHERE student_id = %s
-        """, (total_price, total_price, student['student_id']))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return True, "Успешно"
-    
-    # ==================== УСЛУГИ ====================
-    
-    def get_my_services(self, telegram_user_id):
-        """Мои услуги"""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT s.id, s.name, s.points_cost as price, s.active, 
-                   COUNT(so.id) as orders,
-                   SUM(CASE WHEN so.status = 'completed' THEN s.points_cost ELSE 0 END) as earnings
-            FROM services s
-            JOIN students st ON s.provider_id = st.id
-            LEFT JOIN service_orders so ON s.id = so.service_id
-            WHERE st.telegram_user_id = %s
-            GROUP BY s.id
-        """, (telegram_user_id,))
-        
-        services = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        result = []
-        for svc in services:
-            result.append({
-                "id": svc['id'],
-                "name": svc['name'],
-                "price": svc['price'],
-                "orders": svc['orders'] or 0,
-                "status": "active" if svc['active'] else "inactive",
-                "earnings": svc['earnings'] or 0
-            })
-        
-        return result
-    
-    def add_service(self, telegram_user_id, name, price, description=""):
-        """Разместить услугу"""
-        print(f"[DB] add_service вызван: user={telegram_user_id}, name={name}, price={price}")
-        
-        conn = self.get_connection()
-        if not conn:
-            print("[DB ERROR] Нет подключения к БД")
-            return False
+        try:
+            # Проверяем существует ли
+            cursor.execute("SELECT * FROM students WHERE telegram_user_id = %s", (telegram_user_id,))
+            student = cursor.fetchone()
             
-        cursor = conn.cursor(dictionary=True)
-        
-        # ВРЕМЕННЫЙ ХАРДКОД ДЛЯ ТЕСТА
-        cursor.execute("SELECT id FROM students WHERE telegram_user_id = %s", (telegram_user_id,))
-        student = cursor.fetchone()
-        
-        if not student:
-            print(f"[DB WARNING] Студент не найден, создаю нового: telegram_user_id={telegram_user_id}")
-            # Создаём студента на лету
+            if student:
+                return student
+            
+            # Создаём нового
             student_uuid = str(uuid.uuid4())
-            cursor.execute("""
-                INSERT INTO students (id, telegram_user_id, student_id, last_name, first_name, email)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (student_uuid, telegram_user_id, f"STU{telegram_user_id}", "Автоматически", "Созданный", f"auto{telegram_user_id}@test.com"))
+            student_id = f"STU{telegram_user_id}"
             
             cursor.execute("""
-                INSERT INTO balances (student_id, current_points, total_earned, total_spent)
-                VALUES (%s, 0, 0, 0)
+                INSERT INTO students (id, telegram_user_id, student_id, first_name, last_name)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (student_uuid, telegram_user_id, student_id, first_name, last_name))
+            
+            # Инициализируем баланс
+            cursor.execute("""
+                INSERT INTO balances (student_id, current_points)
+                VALUES (%s, 500)
             """, (student_uuid,))
             
             conn.commit()
-            student = {'id': student_uuid}
-        
-        service_uuid = str(uuid.uuid4())
-        print(f"[DB] Создание услуги с ID: {service_uuid} для студента {student['id']}")
-        
+            return {"id": student_uuid, "telegram_user_id": telegram_user_id, "first_name": first_name}
+        except Error as e:
+            print(f"Error in get_or_create_student: {e}")
+            conn.rollback()
+            return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_student_by_tg_id(self, telegram_id):
+        conn = self.get_connection()
+        if not conn: return None
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT s.*, b.current_points, b.total_earned, b.total_spent,
+                   g.group_code, f.name as faculty_name
+            FROM students s
+            JOIN balances b ON s.id = b.student_id
+            LEFT JOIN `groups` g ON s.group_id = g.id
+            LEFT JOIN faculties f ON s.faculty_id = f.id
+            WHERE s.telegram_user_id = %s
+        """, (telegram_id,))
+        student = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return student
+
+    # ==================== АНАЛИТИКА (ДЛЯ ГРАФИКОВ) ====================
+
+    def get_user_stats(self, telegram_id):
+        """Получение данных о расходах за последние 7 дней для Chart.js"""
+        conn = self.get_connection()
+        if not conn: return []
+        cursor = conn.cursor(dictionary=True)
         try:
             cursor.execute("""
-                INSERT INTO services (id, provider_id, name, points_cost, description, active)
-                VALUES (%s, %s, %s, %s, %s, TRUE)
-            """, (service_uuid, student['id'], name, price, description))
-            
-            conn.commit()
-            print(f"[DB SUCCESS] Услуга '{name}' создана успешно!")
+                SELECT DATE(created_at) as date, SUM(amount) as total 
+                FROM transactions 
+                WHERE student_id = (SELECT id FROM students WHERE telegram_user_id = %s)
+                AND type = 'spend'
+                GROUP BY DATE(created_at) 
+                ORDER BY date ASC 
+                LIMIT 7
+            """, (telegram_id,))
+            data = cursor.fetchall()
+            # Форматируем дату для JS (строка)
+            for row in data:
+                row['date'] = row['date'].strftime('%d.%m') if isinstance(row['date'], datetime) else str(row['date'])
+            return data
+        finally:
             cursor.close()
             conn.close()
-            return True
-        except Exception as e:
-            print(f"[DB ERROR] Ошибка при INSERT: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            cursor.close()
-            conn.close()
-            return False
 
-    
-    def get_all_services(self, exclude_user_id=None):
-        """Все услуги (биржа)"""
+    # ==================== МЕРЧ (БЕЗОПАСНАЯ ТРАНЗАКЦИЯ) ====================
+
+    def get_all_merch(self):
         conn = self.get_connection()
+        if not conn: return []
         cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM merch WHERE stock_quantity > 0")
+        items = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return items
+
+    def buy_merch(self, telegram_id, merch_id, quantity=1):
+        """Покупка мерча с использованием транзакции и блокировки строк"""
+        conn = self.get_connection()
+        if not conn: return False, "Ошибка БД"
         
-        query = """
-            SELECT s.id, s.name, s.points_cost as price, s.description,
-                   st.first_name, st.last_name,
-                   COUNT(so.id) as orders,
-                   AVG(CASE WHEN so.status = 'completed' THEN 5 ELSE NULL END) as rating
+        cursor = conn.cursor(dictionary=True)
+        try:
+            conn.start_transaction() # НАЧАЛО ТРАНЗАКЦИИ
+
+            # 1. Получаем студента
+            cursor.execute("SELECT id FROM students WHERE telegram_user_id = %s", (telegram_id,))
+            student = cursor.fetchone()
+            if not student: return False, "Студент не найден"
+
+            # 2. Получаем товар и БЛОКИРУЕМ его (FOR UPDATE)
+            cursor.execute("SELECT * FROM merch WHERE id = %s FOR UPDATE", (merch_id,))
+            item = cursor.fetchone()
+            if not item: return False, "Товар не найден"
+            if item['stock_quantity'] < quantity: return False, "Товара нет в наличии"
+
+            # 3. Проверяем баланс и БЛОКИРУЕМ его
+            cursor.execute("SELECT current_points FROM balances WHERE student_id = %s FOR UPDATE", (student['id'],))
+            balance = cursor.fetchone()
+            
+            total_price = item['points_cost'] * quantity
+            if balance['current_points'] < total_price:
+                return False, f"Недостаточно баллов (нужно {total_price})"
+
+            # 4. Выполняем действия
+            # Списываем баллы
+            cursor.execute("""
+                UPDATE balances 
+                SET current_points = current_points - %s, total_spent = total_spent + %s 
+                WHERE student_id = %s
+            """, (total_price, total_price, student['id']))
+
+            # Уменьшаем склад
+            cursor.execute("UPDATE merch SET stock_quantity = stock_quantity - %s WHERE id = %s", (quantity, merch_id))
+
+            # Логируем транзакцию
+            cursor.execute("""
+                INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id, status)
+                VALUES (%s, %s, 'spend', %s, %s, 'merch', %s, 'completed')
+            """, (str(uuid.uuid4()), student['id'], total_price, f"Покупка мерча: {item['name']}", item['id']))
+
+            conn.commit() # ФИКСИРУЕМ ВСЕ ИЗМЕНЕНИЯ
+            return True, f"Вы успешно купили {item['name']}"
+
+        except Exception as e:
+            conn.rollback() # ОТКАТ ПРИ ЛЮБОЙ ОШИБКЕ
+            print(f"Ошибка при покупке мерча: {e}")
+            return False, "Внутренняя ошибка сервера"
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ==================== БИРЖА УСЛУГ (БЕЗОПАСНАЯ ТРАНЗАКЦИЯ) ====================
+
+    def get_active_services(self):
+        conn = self.get_connection()
+        if not conn: return []
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT s.*, st.first_name as provider_name 
             FROM services s
             JOIN students st ON s.provider_id = st.id
-            LEFT JOIN service_orders so ON s.id = so.service_id
-            WHERE s.active = TRUE
-        """
-        
-        if exclude_user_id:
-            query += " AND st.telegram_user_id != %s"
-            cursor.execute(query + " GROUP BY s.id LIMIT 20", (exclude_user_id,))
-        else:
-            cursor.execute(query + " GROUP BY s.id LIMIT 20")
-        
+            WHERE s.is_active = 1
+        """)
         services = cursor.fetchall()
         cursor.close()
         conn.close()
-        
-        result = []
-        for svc in services:
-            result.append({
-                "id": svc['id'],
-                "name": svc['name'],
-                "price": svc['price'],
-                "provider": f"{svc['first_name']} {svc['last_name']}",
-                "rating": round(svc['rating'] or 4.5, 1),
-                "orders": svc['orders'] or 0
-            })
-        
-        return result
-    
-    def buy_service(self, telegram_user_id, service_id):
-        """Заказать услугу"""
+        return services
+
+    def add_service(self, telegram_id, name, price, description):
         conn = self.get_connection()
+        if not conn: return False
         cursor = conn.cursor(dictionary=True)
-        
-        # Получаем инфо об услуге
-        cursor.execute("""
-            SELECT s.name, s.points_cost, s.provider_id,
-                   st.telegram_user_id as provider_tg_id
-            FROM services s
-            JOIN students st ON s.provider_id = st.id
-            WHERE s.id = %s AND s.active = TRUE
-        """, (service_id,))
-        service = cursor.fetchone()
-        
-        if not service:
+        try:
+            cursor.execute("SELECT id FROM students WHERE telegram_user_id = %s", (telegram_id,))
+            student = cursor.fetchone()
+            if not student: return False
+            
+            service_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO services (id, provider_id, name, description, points_cost)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (service_id, student['id'], name, description, price))
+            conn.commit()
+            return True
+        except:
+            conn.rollback()
+            return False
+        finally:
             cursor.close()
             conn.close()
-            return False, "Услуга недоступна"
+
+    def buy_service(self, telegram_id, service_id):
+        """Покупка услуги с переводом баллов от студента к студенту"""
+        conn = self.get_connection()
+        if not conn: return False, "Ошибка соединения"
         
-        # Проверяем баланс покупателя
+        cursor = conn.cursor(dictionary=True)
+        try:
+            conn.start_transaction()
+
+            # 1. Покупатель
+            cursor.execute("SELECT id FROM students WHERE telegram_user_id = %s", (telegram_id,))
+            buyer = cursor.fetchone()
+            
+            # 2. Услуга и продавец
+            cursor.execute("SELECT * FROM services WHERE id = %s FOR UPDATE", (service_id,))
+            service = cursor.fetchone()
+            
+            if not buyer or not service: return False, "Объект не найден"
+            if buyer['id'] == service['provider_id']: return False, "Нельзя купить у самого себя"
+
+            # 3. Баланс покупателя
+            cursor.execute("SELECT current_points FROM balances WHERE student_id = %s FOR UPDATE", (buyer['id'],))
+            balance = cursor.fetchone()
+            
+            if balance['current_points'] < service['points_cost']:
+                return False, "Недостаточно баллов"
+
+            # 4. Процесс перевода
+            # Минус у покупателя
+            cursor.execute("UPDATE balances SET current_points = current_points - %s, total_spent = total_spent + %s WHERE student_id = %s",
+                           (service['points_cost'], service['points_cost'], buyer['id']))
+            
+            # Плюс у продавца
+            cursor.execute("UPDATE balances SET current_points = current_points + %s, total_earned = total_earned + %s WHERE student_id = %s",
+                           (service['points_cost'], service['points_cost'], service['provider_id']))
+
+            # Запись о заказе
+            order_uuid = str(uuid.uuid4())
+            cursor.execute("INSERT INTO service_orders (id, service_id, buyer_id, status) VALUES (%s, %s, %s, 'completed')",
+                           (order_uuid, service_id, buyer['id']))
+            
+            # Логи транзакций для обоих
+            cursor.execute("INSERT INTO transactions (id, student_id, type, amount, description) VALUES (%s, %s, 'spend', %s, %s)",
+                           (str(uuid.uuid4()), buyer['id'], service['points_cost'], f"Заказ услуги: {service['name']}"))
+            
+            cursor.execute("INSERT INTO transactions (id, student_id, type, amount, description) VALUES (%s, %s, 'earn', %s, %s)",
+                           (str(uuid.uuid4()), service['provider_id'], service['points_cost'], f"Оплата за услугу: {service['name']}"))
+
+            conn.commit()
+            return True, f"Услуга '{service['name']}' успешно оплачена"
+        except Exception as e:
+            conn.rollback()
+            return False, f"Ошибка: {str(e)}"
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ==================== РЕЙТИНГ (ЛЕЙДЕРБОРД) ====================
+
+    def get_leaderboard(self, limit=10):
+        conn = self.get_connection()
+        if not conn: return []
+        cursor = conn.cursor(dictionary=True)
         cursor.execute("""
-            SELECT s.id, b.current_points
+            SELECT s.first_name, s.last_name, b.current_points
             FROM students s
             JOIN balances b ON s.id = b.student_id
-            WHERE s.telegram_user_id = %s
-        """, (telegram_user_id,))
-        buyer = cursor.fetchone()
-        
-        if not buyer or buyer['current_points'] < service['points_cost']:
-            cursor.close()
-            conn.close()
-            return False, "Недостаточно баллов"
-        
-        # Создаём заказ
-        order_uuid = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO service_orders (id, service_id, buyer_id, status)
-            VALUES (%s, %s, %s, 'pending')
-        """, (order_uuid, service_id, buyer['id']))
-        
-        # Списываем у покупателя
-        cursor.execute("""
-            INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id, status)
-            VALUES (%s, %s, 'spend', %s, %s, 'service_order', %s, 'completed')
-        """, (str(uuid.uuid4()), buyer['id'], service['points_cost'], f"Заказ: {service['name']}", order_uuid))
-        
-        cursor.execute("""
-            UPDATE balances SET current_points = current_points - %s, total_spent = total_spent + %s
-            WHERE student_id = %s
-        """, (service['points_cost'], service['points_cost'], buyer['id']))
-        
-        # Начисляем провайдеру
-        cursor.execute("""
-            INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id, status)
-            VALUES (%s, %s, 'earn', %s, %s, 'service_order', %s, 'completed')
-        """, (str(uuid.uuid4()), service['provider_id'], service['points_cost'], f"Заказали: {service['name']}", order_uuid))
-        
-        cursor.execute("""
-            UPDATE balances SET current_points = current_points + %s, total_earned = total_earned + %s
-            WHERE student_id = %s
-        """, (service['points_cost'], service['points_cost'], service['provider_id']))
-        
-        conn.commit()
+            ORDER BY b.current_points DESC
+            LIMIT %s
+        """, (limit,))
+        result = cursor.fetchall()
         cursor.close()
         conn.close()
-        
-        return True, "Успешно"
+        return result
 
-# Экземпляр БД
 db = Database()

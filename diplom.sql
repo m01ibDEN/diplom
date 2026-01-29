@@ -8,7 +8,7 @@ CREATE TABLE faculties (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Таблица групп (в кавычках!)
+-- Таблица групп
 CREATE TABLE `groups` (
     id INT AUTO_INCREMENT PRIMARY KEY,
     group_code VARCHAR(10) UNIQUE NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE `groups` (
     FOREIGN KEY (faculty_id) REFERENCES faculties(id) ON DELETE RESTRICT
 );
 
--- Таблица студентов
+-- Таблица студентов (ОБНОВЛЕНА: добавлена роль)
 CREATE TABLE students (
     id CHAR(36) PRIMARY KEY,
     telegram_user_id BIGINT UNIQUE NOT NULL,
@@ -28,6 +28,7 @@ CREATE TABLE students (
     middle_name VARCHAR(50),
     group_id INT,
     faculty_id INT,
+    role ENUM('student', 'admin') NOT NULL DEFAULT 'student',
     email VARCHAR(100) UNIQUE,
     phone VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -1,4 +1,4 @@
-# webapp.py — ПОЛНАЯ ВЕРСИЯ (СОХРАНЕН ОРИГИНАЛЬНЫЙ ОБЪЕМ + НОВЫЙ ФУНКЦИОНАЛ)
+# webapp.py
 from flask import Flask, jsonify, render_template_string, request
 from db import db
 import os
@@ -10,24 +10,15 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- НОВАЯ ФУНКЦИЯ УВЕДОМЛЕНИЙ ---
 def send_telegram_notification(user_id, text):
     token = os.getenv("BOT_TOKEN")
-    if not token:
-        print("[DEBUG] BOT_TOKEN не найден в .env, уведомление не отправлено")
-        return
+    if not token: return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
-        res = requests.post(url, json={
-            "chat_id": user_id,
-            "text": text,
-            "parse_mode": "HTML"
-        })
-        print(f"[DEBUG] Статус отправки уведомления: {res.status_code}")
+        requests.post(url, json={"chat_id": user_id, "text": text, "parse_mode": "HTML"})
     except Exception as e:
-        print(f"[ERROR] Ошибка отправки уведомления: {e}")
+        print(f"[ERROR] Ошибка отправки: {e}")
 
-# Твой оригинальный HTML_TEMPLATE с добавлением Chart.js и логики графика
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -47,136 +38,57 @@ HTML_TEMPLATE = """
       --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
       --tg-sec-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
     }
-
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background-color: var(--tg-bg);
-      color: var(--tg-text);
-      line-height: 1.5;
-      overflow-x: hidden;
-      padding-bottom: 100px;
-    }
-
-    .tabs {
-      display: flex;
-      background: var(--tg-sec-bg);
-      padding: 4px;
-      position: sticky;
-      top: 0;
-      z-index: 1000;
-      backdrop-filter: blur(10px);
-      border-bottom: 1px solid rgba(0,0,0,0.1);
-    }
-
-    .tab {
-      flex: 1;
-      padding: 10px 5px;
-      text-align: center;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      border-radius: 8px;
-      transition: all 0.2s ease;
-      color: var(--tg-hint);
-    }
-
-    .tab.active {
-      background: var(--tg-bg);
-      color: var(--tg-text);
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-    }
-
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: var(--tg-bg); color: var(--tg-text); padding-bottom: 100px; }
+    .tabs { display: flex; background: var(--tg-sec-bg); padding: 4px; position: sticky; top: 0; z-index: 1000; border-bottom: 1px solid rgba(0,0,0,0.1); }
+    .tab { flex: 1; padding: 10px 5px; text-align: center; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 8px; color: var(--tg-hint); }
+    .tab.active { background: var(--tg-bg); color: var(--tg-text); box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
     .content-section { display: none; padding: 16px; animation: fadeIn 0.3s ease; }
     .content-section.active { display: block; }
-
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-    .card {
-      background: var(--tg-sec-bg);
-      border-radius: 16px;
-      padding: 20px;
-      margin-bottom: 16px;
-      border: 1px solid rgba(0,0,0,0.05);
-    }
-
-    .balance-card {
-      background: linear-gradient(135deg, var(--tg-btn), #4facfe);
-      color: white;
-      text-align: center;
-      box-shadow: 0 8px 20px rgba(36, 129, 204, 0.2);
-    }
-
-    .balance-label { font-size: 14px; opacity: 0.9; margin-bottom: 4px; }
-    .balance-value { font-size: 36px; font-weight: 800; letter-spacing: -1px; }
-
-    /* СТИЛИ ДЛЯ ГРАФИКА */
+    .card { background: var(--tg-sec-bg); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+    .balance-card { background: linear-gradient(135deg, var(--tg-btn), #4facfe); color: white; text-align: center; box-shadow: 0 8px 20px rgba(36, 129, 204, 0.2); }
+    .balance-value { font-size: 36px; font-weight: 800; }
     .chart-container { margin-top: 20px; width: 100%; height: 200px; }
-
-    .btn {
-      background: var(--tg-btn);
-      color: var(--tg-btn-text);
-      border: none;
-      padding: 12px 20px;
-      border-radius: 12px;
-      font-weight: 600;
-      width: 100%;
-      font-size: 15px;
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-
-    .btn:active { opacity: 0.8; }
-
+    .btn { background: var(--tg-btn); color: var(--tg-btn-text); border: none; padding: 12px 20px; border-radius: 12px; font-weight: 600; width: 100%; font-size: 15px; cursor: pointer; }
     .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-
-    .merch-item {
-      background: var(--tg-sec-bg);
-      border-radius: 12px;
-      padding: 12px;
-      text-align: center;
-    }
-
-    .merch-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+    .merch-item { background: var(--tg-sec-bg); border-radius: 12px; padding: 12px; text-align: center; }
     .merch-price { color: var(--tg-link); font-weight: 700; margin-bottom: 10px; }
-
-    .service-item {
-      background: var(--tg-bg);
-      border: 1px solid var(--tg-sec-bg);
-      border-radius: 12px;
-      padding: 15px;
-      margin-bottom: 12px;
-    }
+    .service-item { background: var(--tg-bg); border: 1px solid var(--tg-sec-bg); border-radius: 12px; padding: 15px; margin-bottom: 12px; }
+    /* Стиль для истории */
+    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
+    .history-meta { font-size: 12px; color: var(--tg-hint); }
+    .history-amount.earn { color: #4caf50; font-weight: bold; }
+    .history-amount.spend { color: #f44336; font-weight: bold; }
   </style>
 </head>
 <body>
-
   <div class="tabs">
     <div class="tab active" onclick="showTab('main')">Профиль</div>
+    <div class="tab" onclick="showTab('history')">История</div>
     <div class="tab" onclick="showTab('merch')">Мерч</div>
     <div class="tab" onclick="showTab('exchange')">Биржа</div>
-    <div class="tab" onclick="showTab('faq')">FAQ</div>
   </div>
 
   <div id="main" class="content-section active">
     <div class="card balance-card">
-      <div class="balance-label">Мой баланс</div>
+      <div style="font-size: 14px; opacity: 0.9;">Мой баланс</div>
       <div class="balance-value" id="balance-display">0</div>
-      <div style="font-size: 12px; margin-top: 5px;">Student Coins (STC)</div>
+      <div style="font-size: 12px;">Student Coins (STC)</div>
     </div>
-
     <div class="card">
       <h4 style="margin-bottom: 10px;">Аналитика расходов</h4>
-      <div class="chart-container">
-        <canvas id="expensesChart"></canvas>
-      </div>
+      <div class="chart-container"><canvas id="expensesChart"></canvas></div>
     </div>
-
     <div class="card">
       <h4 style="margin-bottom: 10px;">Топ студентов</h4>
       <div id="leaderboard" style="font-size: 14px;"></div>
     </div>
+  </div>
+
+  <div id="history" class="content-section">
+    <h3 style="margin-bottom: 15px;">Последние операции</h3>
+    <div id="history-list"></div>
   </div>
 
   <div id="merch" class="content-section">
@@ -187,13 +99,6 @@ HTML_TEMPLATE = """
   <div id="exchange" class="content-section">
     <button class="btn" style="margin-bottom: 20px;" onclick="tg.showAlert('Функция добавления будет в след. обновлении')">+ Разместить услугу</button>
     <div id="services-list"></div>
-  </div>
-
-  <div id="faq" class="content-section">
-    <div class="card">
-      <h4 style="color: var(--tg-link)">Как работают транзакции?</h4>
-      <p style="font-size: 13px; margin-top: 8px;">Все покупки защищены протоколом ACID. Ваши баллы списываются мгновенно и безопасно.</p>
-    </div>
   </div>
 
   <script>
@@ -209,15 +114,14 @@ HTML_TEMPLATE = """
       event.currentTarget.classList.add('active');
       
       if(tabId === 'main') updateAllData();
+      if(tabId === 'history') loadHistory();
       if(tabId === 'merch') loadMerch();
       if(tabId === 'exchange') loadServices();
     }
 
-    // НОВАЯ ФУНКЦИЯ ГРАФИКА
     function renderChart(stats) {
       const ctx = document.getElementById('expensesChart').getContext('2d');
       if (myChart) myChart.destroy();
-      
       myChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -231,28 +135,36 @@ HTML_TEMPLATE = """
             backgroundColor: 'rgba(36, 129, 204, 0.1)'
           }]
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: { y: { beginAtZero: true, grid: { display: false } }, x: { grid: { display: false } } }
-        }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false } }, x: { grid: { display: false } } } }
       });
     }
 
     function updateAllData() {
-      // Загрузка профиля
       fetch(`/api/user/${userId}`).then(r => r.json()).then(user => {
         document.getElementById('balance-display').innerText = user.current_points;
       });
-      // Загрузка статистики для графика
       fetch(`/api/stats/${userId}`).then(r => r.json()).then(stats => renderChart(stats));
-      // Загрузка рейтинга
       fetch(`/api/leaderboard`).then(r => r.json()).then(list => {
         document.getElementById('leaderboard').innerHTML = list.map((s, i) => 
           `<div style="display:flex; justify-content:space-between; padding: 5px 0; border-bottom: 1px solid var(--tg-sec-bg);">
             <span>${i+1}. ${s.first_name}</span><b>${s.current_points}</b>
           </div>`).join('');
+      });
+    }
+
+    function loadHistory() {
+      fetch(`/api/history/${userId}`).then(r => r.json()).then(data => {
+        document.getElementById('history-list').innerHTML = data.map(item => `
+          <div class="history-item">
+            <div>
+              <div style="font-weight: 500; font-size: 14px;">${item.description}</div>
+              <div class="history-meta">${item.created_at}</div>
+            </div>
+            <div class="history-amount ${item.type}">
+              ${item.type === 'earn' ? '+' : '-'}${item.amount}
+            </div>
+          </div>
+        `).join('');
       });
     }
 
@@ -320,8 +232,6 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# ==================== ТВОИ ОРИГИНАЛЬНЫЕ ЭНДПОИНТЫ (ВОЗВРАЩЕНЫ) ====================
-
 @app.route('/miniapp')
 def miniapp():
     return render_template_string(HTML_TEMPLATE)
@@ -329,20 +239,23 @@ def miniapp():
 @app.route('/api/user/<int:user_id>')
 def api_user(user_id):
     try:
-        print(f"[DEBUG] Запрос данных пользователя: {user_id}")
         student = db.get_student_by_tg_id(user_id)
-        if not student:
-            return jsonify({"error": "User not found"}), 404
+        if not student: return jsonify({"error": "User not found"}), 404
         return jsonify(student)
     except Exception as e:
-        print(f"[ERROR] api_user: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stats/<int:user_id>')
 def api_stats(user_id):
     try:
-        stats = db.get_user_stats(user_id)
-        return jsonify(stats)
+        return jsonify(db.get_user_stats(user_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/history/<int:user_id>')
+def api_history(user_id):
+    try:
+        return jsonify(db.get_student_history(user_id))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -356,11 +269,8 @@ def api_leaderboard():
 @app.route('/api/merch')
 def api_merch():
     try:
-        print("[DEBUG] Получение списка мерча")
-        items = db.get_all_merch()
-        return jsonify(items)
+        return jsonify(db.get_all_merch())
     except Exception as e:
-        print(f"[ERROR] api_merch: {e}")
         return jsonify([]), 500
 
 @app.route('/api/services')
@@ -376,16 +286,10 @@ def api_buy_merch():
         data = request.json
         u_id = int(data.get('user_id'))
         m_id = data.get('merch_id')
-        
-        print(f"[API] Покупка мерча {m_id} пользователем {u_id}")
         success, message = db.buy_merch(u_id, m_id)
-        
-        if success:
-            send_telegram_notification(u_id, f"<b>✅ Покупка прошла успешно!</b>\n\nВы приобрели мерч.\nСтатус: {message}")
-            
+        if success: send_telegram_notification(u_id, f"✅ Покупка мерча успешна!\n{message}")
         return jsonify({"success": success, "message": message})
     except Exception as e:
-        traceback.print_exc()
         return jsonify({"success": False, "message": "Ошибка сервера"}), 500
 
 @app.route('/api/buy_service', methods=['POST'])
@@ -394,16 +298,11 @@ def api_buy_service():
         data = request.json
         u_id = int(data.get('user_id'))
         s_id = data.get('service_id')
-        
         success, message = db.buy_service(u_id, s_id)
-        
-        if success:
-            send_telegram_notification(u_id, f"<b>💼 Услуга оплачена!</b>\n\nДетали: {message}")
-            
+        if success: send_telegram_notification(u_id, f"💼 Услуга оплачена!\n{message}")
         return jsonify({"success": success, "message": message})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 if __name__ == '__main__':
-    print("--- Запуск Flask сервера Student Coins ---")
     app.run(host='0.0.0.0', port=8000, debug=True)

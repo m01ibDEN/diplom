@@ -60,15 +60,33 @@ HTML_TEMPLATE = """
     .history-meta { font-size: 12px; color: var(--tg-hint); }
     .history-amount.earn { color: #4caf50; font-weight: bold; }
     .history-amount.spend { color: #f44336; font-weight: bold; }
+    .input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.08);
+      background: var(--tg-bg);
+      color: var(--tg-text);
+      font-size: 14px;
+      outline: none;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--tg-text);
+      border: 1px solid rgba(0,0,0,0.15);
+    }
+
   </style>
 </head>
 <body>
   <div class="tabs">
-    <div class="tab active" onclick="showTab('main')">Профиль</div>
-    <div class="tab" onclick="showTab('history')">История</div>
-    <div class="tab" onclick="showTab('merch')">Мерч</div>
-    <div class="tab" onclick="showTab('exchange')">Биржа</div>
+    <div class="tab active" onclick="showTab('main', this)">Профиль</div>
+    <div class="tab" onclick="showTab('history', this)">История</div>
+    <div class="tab" onclick="showTab('merch', this)">Мерч</div>
+    <div class="tab" onclick="showTab('exchange', this)">Биржа</div>
   </div>
+
 
   <div id="main" class="content-section active">
     <div class="card balance-card">
@@ -97,27 +115,99 @@ HTML_TEMPLATE = """
   </div>
 
   <div id="exchange" class="content-section">
-    <button class="btn" style="margin-bottom: 20px;" onclick="tg.showAlert('Функция добавления будет в след. обновлении')">+ Разместить услугу</button>
-    <div id="services-list"></div>
+  <button class="btn" style="margin-bottom: 12px;" onclick="toggleCreateService()">
+    + Разместить услугу
+  </button>
+
+  <div id="create-service-card" class="card" style="display:none;">
+    <h3 style="margin-bottom: 12px;">Новая услуга</h3>
+
+    <div style="margin-bottom: 10px;">
+      <div style="font-size: 12px; color: var(--tg-hint); margin-bottom: 6px;">Название</div>
+      <input id="svc-name" class="input" placeholder="Напр.: Помощь с Python" />
+    </div>
+
+    <div style="margin-bottom: 10px;">
+      <div style="font-size: 12px; color: var(--tg-hint); margin-bottom: 6px;">Цена (STC)</div>
+      <input id="svc-price" class="input" type="number" min="1" placeholder="100" />
+    </div>
+
+    <div style="margin-bottom: 10px;">
+      <div style="font-size: 12px; color: var(--tg-hint); margin-bottom: 6px;">Описание</div>
+      <textarea id="svc-desc" class="input" rows="3" placeholder="Кратко опиши, что именно делаешь"></textarea>
+    </div>
+
+    <button class="btn" onclick="createService()">Опубликовать</button>
+    <button class="btn btn-secondary" style="margin-top: 8px;" onclick="toggleCreateService(false)">Отмена</button>
   </div>
 
+  <div id="services-list"></div>
+  </div>
+
+
   <script>
-    let tg = window.Telegram.WebApp;
-    tg.expand();
+    const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+    if (tg) tg.expand();
+
     const userId = new URLSearchParams(window.location.search).get('user_id');
+
+    function uiAlert(msg) {
+      // Если есть tg и версия >= 6.2 — используем нативный popup
+      if (tg && tg.showPopup && isVersionAtLeast('6.2')) {
+        tg.showAlert(msg);
+      } else {
+        // Иначе обычный браузерный alert
+        alert(msg);
+      }
+    }
+
+    function uiConfirm(msg, callback) {
+      if (tg && tg.showPopup && isVersionAtLeast('6.2')) {
+        tg.showConfirm(msg, callback);
+      } else {
+        // Браузерный confirm (синхронный)
+        const result = confirm(msg);
+        callback(result);
+      }
+    }
+
+    // Хелпер для проверки версии (6.0 < 6.2)
+    function isVersionAtLeast(minVer) {
+      if (!tg || !tg.version) return false;
+      const v1 = tg.version.split('.').map(Number);
+      const v2 = minVer.split('.').map(Number);
+      return (v1[0] > v2[0]) || (v1[0] === v2[0] && v1[1] >= v2[1]);
+    }
+
+
     let myChart = null;
 
-    function showTab(tabId) {
-      document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.getElementById(tabId).classList.add('active');
-      event.currentTarget.classList.add('active');
-      
-      if(tabId === 'main') updateAllData();
-      if(tabId === 'history') loadHistory();
-      if(tabId === 'merch') loadMerch();
-      if(tabId === 'exchange') loadServices();
+    function showTab(tabId, el) {
+        // 1. Скрываем все секции
+        document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+        
+        // 2. Убираем активность со всех табов
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        
+        // 3. Активируем нужную секцию
+        const section = document.getElementById(tabId);
+        if (section) section.classList.add('active');
+
+        // 4. Активируем таб (если el передан — используем его, иначе ищем через event)
+        if (el) {
+            el.classList.add('active');
+        } else if (window.event && window.event.currentTarget) {
+            window.event.currentTarget.classList.add('active');
+        }
+
+        // 5. Загружаем данные
+        if(tabId === 'main') updateAllData();
+        if(tabId === 'history') loadHistory();
+        if(tabId === 'merch') loadMerch();
+        if(tabId === 'exchange') loadServices();
     }
+
+
 
     function renderChart(stats) {
       const ctx = document.getElementById('expensesChart').getContext('2d');
@@ -196,24 +286,94 @@ HTML_TEMPLATE = """
       });
     }
 
-    function loadServices() {
-      fetch('/api/services').then(r => r.json()).then(data => {
-        document.getElementById('services-list').innerHTML = data.map(s => `
-          <div class="service-item">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <div style="font-weight:600;">${s.name}</div>
-                <div style="font-size:12px; color:var(--tg-hint);">Автор: ${s.provider_name}</div>
+        function loadServices() {
+          // Обязательно передаем user_id в GET-параметре, чтобы SQL знал, кто "я"
+          fetch(`/api/services?user_id=${userId}`).then(r => r.json()).then(data => {
+            const list = document.getElementById('services-list');
+            
+            if (data.length === 0) {
+                list.innerHTML = '<div style="text-align:center; padding:20px;">Заданий нет</div>';
+                return;
+            }
+
+            list.innerHTML = data.map(s => {
+              if (s.status === 'completed') return ''; 
+
+              let actionButton = '';
+              let statusBadge = '';
+
+              // Логика теперь проще, так как сервер уже все посчитал
+              if (s.is_my_task) {
+                if (s.status === 'in_progress') {
+                    statusBadge = '<span style="color:#2481cc;">⚙️ В работе</span>';
+                    // Передаем s.order_id для подтверждения!
+                    actionButton = `<button class="btn" style="background:#4caf50; margin-top:5px;" onclick="confirmTask('${s.order_id}')">✅ Принять и оплатить</button>`;
+                } else {
+                    statusBadge = '<span style="color:var(--tg-hint);">⏳ Ждем исполнителя</span>';
+                }
+              } else {
+                if (s.status === 'open') {
+                    actionButton = `<button class="btn" onclick="takeTask('${s.id}')">⚡️ Выполнить за ${s.points_cost}</button>`;
+                } else if (s.am_i_executor) {
+                    statusBadge = '<span style="color:#4caf50; font-weight:bold;">🛠 Вы выполняете</span>';
+                    actionButton = `<div style="font-size:12px; margin-top:5px; color:var(--tg-hint);">Выполните работу и сообщите заказчику</div>`;
+                } else {
+                    statusBadge = '<span style="color:var(--tg-hint);">🔒 Занято</span>';
+                }
+              }
+
+              return `
+              <div class="service-item">
+                <div style="display:flex; justify-content:space-between; align-items:start;">
+                  <div style="flex:1; padding-right:10px;">
+                    <div style="font-weight:700; font-size:15px;">${s.name}</div>
+                    <div style="font-size:13px; margin:4px 0;">${s.description || ''}</div>
+                    <div style="font-size:11px; color:var(--tg-hint);">
+                        Автор: ${s.is_my_task ? 'Вы' : s.provider_name}
+                    </div>
+                    <div style="margin-top:5px;">${statusBadge}</div>
+                  </div>
+                  <div style="text-align:right; min-width:80px;">
+                    <div style="color:var(--tg-link); font-weight:800; font-size:16px;">${s.points_cost}</div>
+                    ${actionButton}
+                  </div>
+                </div>
               </div>
-              <div style="text-align:right;">
-                <div style="color:var(--tg-link); font-weight:700;">${s.points_cost}</div>
-                <button class="btn" style="padding:4px 10px; font-size:11px; margin-top:5px;" onclick="buyService('${s.id}')">Заказать</button>
-              </div>
-            </div>
-          </div>
-        `).join('');
-      });
-    }
+              `;
+            }).join('');
+          });
+        }
+
+        // Новые функции-действия
+        function takeTask(id) {
+            uiConfirm("Взять это задание в работу? Вы станете единственным исполнителем.", (ok) => {
+                if(!ok) return;
+                fetch('/api/take_task', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: userId, service_id: id})
+                }).then(r => r.json()).then(res => {
+                    uiAlert(res.message);
+                    loadServices(); // Обновляем список
+                });
+            });
+        }
+
+        function confirmTask(orderId) {
+          uiConfirm("Подтвердить выполнение и оплатить?", (ok) => {
+              if(!ok) return;
+              fetch('/api/confirm_task', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({user_id: userId, order_id: orderId})
+              }).then(r => r.json()).then(res => {
+                  uiAlert(res.message);
+                  updateAllData();
+                  loadServices();
+              });
+          });
+      }
+
 
     function buyService(id) {
       fetch('/api/buy_service', {
@@ -227,6 +387,50 @@ HTML_TEMPLATE = """
     }
 
     updateAllData();
+
+    function toggleCreateService(force) {
+      const card = document.getElementById('create-service-card');
+      const show = (typeof force === 'boolean') ? force : (card.style.display === 'none');
+      card.style.display = show ? 'block' : 'none';
+    }
+
+    function createService() {
+      if (!userId) return uiAlert('Нет user_id в URL. Открой /miniapp?user_id=12345');
+
+      const name = document.getElementById('svc-name').value.trim();
+      const price = parseInt(document.getElementById('svc-price').value, 10);
+      const desc = document.getElementById('svc-desc').value.trim();
+
+      if (!name || !price || price < 1) return uiAlert('Заполни название и цену (>= 1).');
+
+      uiConfirm(`Опубликовать услугу "${name}" за ${price} STC?`, (ok) => {
+        if (!ok) return;
+
+        fetch('/api/add_service', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            user_id: parseInt(userId, 10),
+            name: name,
+            points_cost: price,
+            description: desc
+          })
+        })
+        .then(r => r.json())
+        .then(res => {
+          uiAlert(res.message || (res.success ? 'Готово' : 'Ошибка'));
+          if (res.success) {
+            document.getElementById('svc-name').value = '';
+            document.getElementById('svc-price').value = '';
+            document.getElementById('svc-desc').value = '';
+            toggleCreateService(false);
+            loadServices(); // обновим список
+          }
+        })
+        .catch(err => uiAlert('Ошибка сети: ' + err));
+      });
+    }
+
   </script>
 </body>
 </html>
@@ -275,9 +479,13 @@ def api_merch():
 
 @app.route('/api/services')
 def api_services():
+    user_id = request.args.get('user_id')
+    if not user_id: return jsonify([])
     try:
-        return jsonify(db.get_active_services())
+        # Передаем user_id (число), чтобы БД знала, кто смотрит список
+        return jsonify(db.get_all_services(int(user_id)))
     except Exception as e:
+        print(e)
         return jsonify([]), 500
 
 @app.route('/api/buy_merch', methods=['POST'])
@@ -303,6 +511,64 @@ def api_buy_service():
         return jsonify({"success": success, "message": message})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/add_service', methods=['POST'])
+def api_add_service():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        u_id = int(data.get('user_id') or 0)
+        name = (data.get('name') or '').strip()
+        points_cost = int(data.get('points_cost') or 0)
+        description = (data.get('description') or '').strip()
+
+        if not u_id or not name or points_cost < 1:
+            return jsonify({"success": False, "message": "Некорректные данные"}), 400
+
+        # на всякий случай создаём студента (для web-тестов)
+        # db.get_or_create_student(u_id, first_name="Student", last_name="", username="")
+
+        success, message = db.add_service(u_id, name, points_cost, description)
+
+        if success:
+            send_telegram_notification(u_id, f"✅ Услуга размещена: <b>{name}</b>\nЦена: {points_cost} STC")
+        return jsonify({"success": success, "message": message})
+    except Exception as e:
+        print("[api_add_service ERROR]", e)
+        traceback.print_exc()
+        return jsonify({"success": False, "message": "Ошибка сервера"}), 500
+  
+@app.route('/api/take_task', methods=['POST'])
+def api_take_task():
+    try:
+        data = request.json
+        # Безопасно пытаемся получить ID
+        try:
+            u_id = int(data.get('user_id'))
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "message": "Ошибка: user_id должен быть числом (Telegram ID)"}), 400
+            
+        success, msg = db.assign_service(data.get('service_id'), u_id)
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Ошибка сервера: {str(e)}"}), 500
+
+
+@app.route('/api/confirm_task', methods=['POST'])
+def api_confirm_task():
+    try:
+        data = request.json
+        u_id = int(data.get('user_id'))
+        # ВНИМАНИЕ: здесь мы подтверждаем конкретный ORDER_ID, а не service_id
+        # (потому что в service_orders может быть несколько заказов на одну услугу теоретически, 
+        #  но у нас пока 1 к 1. Но для точности используем ID заказа)
+        order_id = data.get('order_id') 
+        
+        success, msg = db.complete_service_order(order_id, u_id)
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)

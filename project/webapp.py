@@ -229,25 +229,25 @@ HTML_TEMPLATE = """
   <div id="merch" class="content-section">
     <h3 style="margin-bottom: 15px;">Магазин мерча</h3>
     <div class="grid">
-        <div class="merch-item" onclick="openMerchModal('Футболка Basic', 1000, 'Хлопок 100%', 'S, M, L, XL', 'В наличии', '/static/merch1.jpg')">
+        <div class="merch-item" onclick="openMerchModal('Футболка Basic', 1500, 'Хлопок 100%', 'S, M, L, XL', 'В наличии', '/static/merch1.jpg')">
             <img src="/static/merch1.jpg" class="merch-img" onerror="this.src='https://via.placeholder.com/150'">
             <div class="merch-info">
                 <div class="merch-name">Футболка Basic</div>
-                <div class="merch-price">1000 STC</div>
+                <div class="merch-price">1500 STC</div>
             </div>
         </div>
-        <div class="merch-item" onclick="openMerchModal('Худи Oversize', 1000, 'Футер 3-х нитка', 'M, L, XL', 'В наличии', '/static/merch2.jpg')">
+        <div class="merch-item" onclick="openMerchModal('Худи Oversize', 2000, 'Футер 3-х нитка', 'M, L, XL', 'В наличии', '/static/merch2.jpg')">
             <img src="/static/merch2.jpg" class="merch-img" onerror="this.src='https://via.placeholder.com/150'">
             <div class="merch-info">
                 <div class="merch-name">Худи Oversize</div>
-                <div class="merch-price">1000 STC</div>
+                <div class="merch-price">2000 STC</div>
             </div>
         </div>
-        <div class="merch-item" onclick="openMerchModal('Свитшот Logo', 1000, 'Хлопок + Полиэстер', 'XS, S, M', 'Мало', '/static/merch3.jpg')">
+        <div class="merch-item" onclick="openMerchModal('Свитшот Logo', 2000, 'Хлопок + Полиэстер', 'XS, S, M', 'Нет в наличии', '/static/merch3.jpg')">
             <img src="/static/merch3.jpg" class="merch-img" onerror="this.src='https://via.placeholder.com/150'">
             <div class="merch-info">
                 <div class="merch-name">Свитшот Logo</div>
-                <div class="merch-price">1000 STC</div>
+                <div class="merch-price">2000 STC</div>
             </div>
         </div>
     </div>
@@ -297,7 +297,8 @@ HTML_TEMPLATE = """
     <div class="tab" onclick="showTab('faq', this)">FAQ</div>
   </div>
 
-  <div id="merch-modal" class="modal-overlay">
+  <div id="merch-modal" class="modal-overlay" onclick="if(event.target === this) closeMerchModal()">
+
       <div class="modal-content">
           <img id="modal-img" src="" class="modal-img-full">
           <div id="modal-title" class="modal-title">Товар</div>

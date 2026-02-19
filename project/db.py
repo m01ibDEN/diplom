@@ -112,7 +112,6 @@ class Database:
             conn.close()
 
     def get_user_stats(self, telegram_id):
-        """Статистика для графика (по транзакциям)"""
         uuid_id = self._get_student_uuid(telegram_id)
         if not uuid_id: return []
 
@@ -120,19 +119,35 @@ class Database:
         if not conn: return []
         try:
             cur = conn.cursor(dictionary=True)
-            # Группируем расходы по дням
+            
+            # ИСПРАВЛЕННЫЙ ЗАПРОС:
+            # 1. Группируем по DATE(created_at)
+            # 2. Сортируем по этой же дате
             cur.execute("""
-                SELECT DATE_FORMAT(created_at, '%d.%m') as date, SUM(amount) as total
+                SELECT 
+                    DATE_FORMAT(created_at, '%d.%m') as date, 
+                    SUM(amount) as total
                 FROM transactions
                 WHERE student_id = %s AND type = 'spend'
-                GROUP BY DATE(created_at)
-                ORDER BY created_at DESC
+                GROUP BY DATE(created_at), DATE_FORMAT(created_at, '%d.%m')
+                ORDER BY DATE(created_at) DESC
                 LIMIT 7
             """, (uuid_id,))
+            
             data = cur.fetchall()
-            return list(reversed(data)) # Чтобы график шел слева направо
+            
+            # Превращаем Decimal в float (на всякий случай)
+            for row in data:
+                if 'total' in row:
+                    row['total'] = float(row['total'])
+                    
+            return list(reversed(data))
+        except Exception as e:
+            print(f"[DB STATS ERROR] {e}")
+            return []
         finally:
             conn.close()
+
 
     def get_student_history(self, telegram_id):
         """История операций"""
@@ -434,6 +449,119 @@ class Database:
             return False, str(e)
         finally:
             conn.close()
+    
+        # --- РОЛИ И АДМИНКА ---
+    
+    def get_student_by_tg_id(self, telegram_id):
+        # ОБНОВЛЕННЫЙ МЕТОД: теперь возвращает role
+        conn = self._get_connection()
+        if not conn: return None
+        try:
+            cur = conn.cursor(dictionary=True)
+            query = """
+                SELECT s.id, s.telegram_user_id, s.first_name, s.last_name, s.role,
+                       IFNULL(b.current_points, 0) as current_points,
+                       IFNULL(b.total_earned, 0) as total_earned,
+                       IFNULL(b.total_spent, 0) as total_spent
+                FROM students s
+                LEFT JOIN balances b ON s.id = b.student_id
+                WHERE s.telegram_user_id = %s
+            """
+            cur.execute(query, (telegram_id,))
+            return cur.fetchone()
+        finally:
+            conn.close()
+
+    def get_admin_stats(self):
+        """Статистика для админки"""
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            stats = {}
+            # Всего пользователей
+            cur.execute("SELECT COUNT(*) as cnt FROM students")
+            stats['users_count'] = cur.fetchone()['cnt']
+            # Всего денег в системе
+            cur.execute("SELECT SUM(current_points) as total FROM balances")
+            stats['money_in_system'] = cur.fetchone()['total'] or 0
+            # Последние 10 транзакций
+            cur.execute("""
+                SELECT t.amount, t.type, t.description, s.last_name 
+                FROM transactions t
+                JOIN students s ON t.student_id = s.id
+                ORDER BY t.created_at DESC LIMIT 10
+            """)
+            stats['last_transactions'] = cur.fetchall()
+            return stats
+        finally:
+            conn.close()
+
+    # --- МЕРОПРИЯТИЯ (Студсовет) ---
+
+    def create_activity(self, title, points, description, date_str):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            act_id = str(uuid.uuid4())
+            # Предполагаем, что date_str это строка YYYY-MM-DD
+            cur.execute("""
+                INSERT INTO activities (id, title, points, category, start_date, status)
+                VALUES (%s, %s, %s, 'event', %s, 'active')
+            """, (act_id, title, points, date_str))
+            conn.commit()
+            return True, "Мероприятие создано"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def get_active_activities(self):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            # Берем только активные
+            cur.execute("""
+                SELECT id, title, points, DATE_FORMAT(start_date, '%d.%m.%Y') as date 
+                FROM activities WHERE status = 'active' ORDER BY start_date
+            """)
+            return cur.fetchall()
+        finally:
+            conn.close()
+
+    # --- МЕРЧ (Студсовет) ---
+    
+    def add_new_merch(self, name, description, price, stock):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            m_id = str(uuid.uuid4())
+            cur.execute("""
+                INSERT INTO merch (id, name, description, price_points, stock)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (m_id, name, description, price, stock))
+            conn.commit()
+            return True, "Товар добавлен"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+    def add_new_merch(self, name, description, price, stock, image_url=""):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            m_id = str(uuid.uuid4())
+            # Добавили image_url в INSERT
+            cur.execute("""
+                INSERT INTO merch (id, name, description, price_points, stock, image_url)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (m_id, name, description, price, stock, image_url))
+            conn.commit()
+            return True, "Товар добавлен"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
 
 # Создаем единственный экземпляр
 db = Database()

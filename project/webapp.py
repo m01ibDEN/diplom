@@ -104,6 +104,186 @@ def sdk_transaction():
     except Exception as e:
         print(f"[SDK ERROR] {e}") # Вывод ошибки в консоль сервера
         return jsonify({"success": False, "message": f"Server Error: {str(e)}"}), 500
+    
+# Это роут, который отдает саму HTML-страницу! Без него будет 404.
+@app.route('/auctions', methods=['GET'])
+def auctions_page():
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return "А где твой user_id, бро?", 400
+        
+    conn = db._get_connection()
+    if conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (user_id,))
+        user = cur.fetchone()
+        role = user['role'] if user else 'student'
+        conn.close()
+    else:
+        role = 'student'
+        
+    return render_template('auctions.html', user_id=user_id, role=role)
+
+
+@app.route('/api/auctions', methods=['GET'])
+def api_get_auctions_list():
+    """Отдаёт список всех открытых лотов"""
+    conn = db._get_connection()
+    if not conn:
+        return jsonify([]), 500
+        
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Достаем все открытые аукционы, сортируем по времени (кто быстрее кончится — тот первый)
+        cur.execute("""
+            SELECT id, title, description, image_url, start_price, current_bid, end_time, status 
+            FROM auctions 
+            WHERE status = 'open' AND end_time > NOW()
+            ORDER BY end_time ASC
+        """)
+        auctions_list = cur.fetchall()
+        
+        # MySQL отдаёт datetime как объект, его нужно конвертнуть в строку для JSON
+        for auc in auctions_list:
+            if auc['end_time']:
+                auc['end_time'] = auc['end_time'].strftime('%Y-%m-%d %H:%M')
+                
+        return jsonify(auctions_list), 200
+        
+    except Exception as e:
+        print(f"[ERROR] Ошибка получения списка аукционов: {e}")
+        return jsonify([]), 500
+    finally:
+        conn.close()
+
+from flask import request, render_template
+
+@app.route('/auction_detail', methods=['GET'])
+def auction_detail_page():
+    auction_id = request.args.get('id')
+    user_id = request.args.get('user_id')
+    
+    if not auction_id or not user_id:
+         return "Где параметры?", 400
+         
+    # Узнаем роль юзера, чтобы скрыть кнопку
+    conn = db._get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (user_id,))
+    user = cur.fetchone()
+    role = user['role'] if user else 'student'
+    conn.close()
+    
+    auction = db.get_auction_details(auction_id)
+    if not auction:
+         return "Упс, лот исчез!", 404
+         
+    # Прокидываем role в HTML!
+    return render_template('auction_detail.html', auction=auction, user_id=user_id, role=role)
+
+
+@app.route('/api/auctions/bid', methods=['POST'])
+def api_place_bid():
+    """Студент ставит свои кровные STC на аукционе"""
+    try:
+        data = request.get_json()
+        
+        auction_id = data.get('auction_id')
+        tg_user_id = data.get('user_id') # Это твой telegram_user_id (например, 588388231)
+        
+        # Конвертируем ставку в целое число с защитой от дурака
+        try:
+            bid_amount = int(data.get('bid_amount'))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': 'Эу, братик, ставка должна быть числом!'}), 400
+            
+        if not all([auction_id, tg_user_id, bid_amount]):
+            return jsonify({'success': False, 'message': 'Чего-то не хватает! Либо лота нет, либо юзера, либо ставки.'}), 400
+            
+        # 🔥 ВЫЗЫВАЕМ МЕТОД из твоего класса БД 🔥
+        # Убедись, что метод `place_bid` добавлен в твой класс работы с БД!
+        success, message = db.place_bid(auction_id, tg_user_id, bid_amount)
+        
+        if success:
+            return jsonify({'success': True, 'message': message}), 200
+        else:
+            # 400 Bad Request (когда нет денег или ставка слишком мелкая)
+            return jsonify({'success': False, 'message': message}), 400
+
+    except Exception as e:
+        print(f"[ERROR] Ошибка ручки ставки: {e}")
+        return jsonify({'success': False, 'message': 'Внутренняя ошибка сервера при попытке поставить ставку'}), 500
+
+
+@app.route('/api/auctions/create_custom', methods=['POST'])
+def api_create_custom_auction():
+    """Студсовет выставляет новый абстрактный лот"""
+    try:
+        data = request.get_json()
+        
+        # Достаем данные из JSON-body
+        tg_user_id = data.get('user_id')
+        title = data.get('name') 
+        description = data.get('description', '')
+        
+        # Если юзер не ввел цену — крашимся. Конвертируем в Int для страховки.
+        try:
+            start_price = int(data.get('start_price'))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': 'Цена должна быть числом!'}), 400
+            
+        end_time_str = data.get('end_time') # Приходит в формате 'YYYY-MM-DDTHH:MM' (из input type="datetime-local")
+        
+        # Дефолтная картинка, если Студсовет поленился закинуть свою
+        image_url = data.get('image_url', 'https://via.placeholder.com/300x150?text=Аукцион')
+        
+        # Защита от дурака: проверим, все ли важные поля на месте
+        if not all([tg_user_id, title, start_price, end_time_str]):
+             return jsonify({'success': False, 'message': 'Заполни название, цену и время!'}), 400
+             
+        # 🔥 Вызываем наш могучий метод из класса БД (который мы писали при рефакторинге) 🔥
+        # (Убедись, что метод create_standalone_auction добавлен в твой класс db!)
+        success, message = db.create_standalone_auction(
+            tg_user_id, title, description, image_url, start_price, end_time_str
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': message}), 200
+        else:
+            return jsonify({'success': False, 'message': message}), 400
+
+    except Exception as e:
+        print(f"[ERROR] Ошибка ручки создания лота: {e}")
+        return jsonify({'success': False, 'message': 'Что-то пошло не так на сервере'}), 500
+
+
+@app.route('/api/auctions/count', methods=['GET'])
+def api_get_auction_count():
+    # Открываем коннект к БД (через твой класс db)
+    conn = db._get_connection()
+    if not conn:
+        return jsonify({'count': 0}), 500
+        
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Считаем только те аукционы, которые открыты (status = 'open') 
+        # и время которых еще не вышло (end_time > NOW())
+        cur.execute("""
+            SELECT COUNT(*) as count 
+            FROM auctions 
+            WHERE status = 'open' AND end_time > NOW()
+        """)
+        result = cur.fetchone()
+        
+        # Отдаем циферку на фронт
+        auction_count = result['count'] if result else 0
+        return jsonify({'count': auction_count}), 200
+        
+    except Exception as e:
+        print(f"[ERROR] Ошибка счетчика аукционов: {e}")
+        return jsonify({'count': 0}), 500
+    finally:
+        conn.close()
 
 # --- MERCH API ---
 
@@ -166,6 +346,7 @@ def api_add_merch_item():
     except Exception as e:
         print(e)
         return jsonify({"success": False, "message": str(e)}), 500
+    
 @app.route('/api/merch/delete/<merch_id>', methods=['POST'])
 def api_delete_merch(merch_id):
     try:
@@ -333,6 +514,24 @@ def api_create_activity():
 @app.route('/api/activities')
 def api_activities():
     return jsonify(db.get_active_activities())
+
+from apscheduler.schedulers.background import BackgroundScheduler
+# Предположим, твой класс с БД импортирован как db (db = Database())
+
+def run_auction_bot():
+    """Обёртка для вызова метода БД"""
+    print("[AUCTION] Проверяю завершенные лоты...")
+    db.process_finished_auctions()
+
+# Инициализируем планировщик
+scheduler = BackgroundScheduler()
+
+# Добавляем задачу: крутить функцию каждую минуту (60 сек)
+scheduler.add_job(func=run_auction_bot, trigger="interval", seconds=60)
+
+# Запускаем фон!
+scheduler.start()
+
 
 # --- ЗАПУСК ---
 if __name__ == '__main__':

@@ -1,515 +1,805 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Student Coins</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root {
-      --tg-bg: var(--tg-theme-bg-color, #ffffff);
-      --tg-text: var(--tg-theme-text-color, #000000);
-      --tg-hint: var(--tg-theme-hint-color, #999999);
-      --tg-link: var(--tg-theme-link-color, #2481cc);
-      --tg-btn: var(--tg-theme-button-color, #2481cc);
-      --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
-      --tg-sec-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    
-    body { 
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
-      background-color: var(--tg-bg); 
-      color: var(--tg-text); 
-      padding-bottom: 80px; 
-      padding-top: 10px;
-      overscroll-behavior-y: none;
-    }
-    .delete-merch-btn {
-        position: absolute;
-        top: 5px;
-        right: 5px;
-        background: rgba(0,0,0,0.6);
-        color: white;
-        border: none;
-        border-radius: 50%;
-        width: 24px;
-        height: 24px;
-        font-size: 16px;
-        line-height: 1;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10;
-        transition: background 0.2s;
-    }
-    .delete-merch-btn:hover {
-        background: #f44336;
-    }
-    /* --- НАВИГАЦИЯ --- */
-    .tabs { 
-      display: flex; 
-      background: var(--tg-sec-bg); 
-      padding-bottom: env(safe-area-inset-bottom);
-      position: fixed; 
-      bottom: 0; left: 0; right: 0;
-      z-index: 1000; 
-      border-top: 1px solid rgba(0,0,0,0.1); 
-      height: 55px;
-    }
-    .tab { 
-      flex: 1; 
-      display: flex; align-items: center; justify-content: center;
-      font-size: 11px; 
-      font-weight: 500; 
-      cursor: pointer; 
-      color: var(--tg-hint); 
-      transition: color 0.2s;
-    }
-    .tab.active { 
-      color: var(--tg-link); 
-      background: rgba(0,0,0,0.05);
-      font-weight: 600;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Student Coins</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --tg-bg: var(--tg-theme-bg-color, #ffffff);
+            --tg-text: var(--tg-theme-text-color, #000000);
+            --tg-hint: var(--tg-theme-hint-color, #999999);
+            --tg-link: var(--tg-theme-link-color, #2481cc);
+            --tg-btn: var(--tg-theme-button-color, #2481cc);
+            --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
+            --tg-sec-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+        }
 
-    /* --- СУБ-ТАБЫ --- */
-    .sub-tabs { display: flex; gap: 8px; margin-bottom: 15px; padding: 4px; background: var(--tg-sec-bg); border-radius: 12px; }
-    .sub-tab { flex: 1; text-align: center; padding: 8px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; color: var(--tg-hint); transition: 0.2s; }
-    .sub-tab.active { background: var(--tg-btn); color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
 
-    .content-section { display: none; padding: 16px; animation: fadeIn 0.3s ease; }
-    .content-section.active { display: block; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-bg);
+            color: var(--tg-text);
+            padding-bottom: 80px;
+            padding-top: 10px;
+            overscroll-behavior-y: none;
+        }
 
-    .card { background: var(--tg-sec-bg); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
-    .balance-card { background: linear-gradient(135deg, var(--tg-btn), #4facfe); color: white; text-align: center; box-shadow: 0 8px 20px rgba(36, 129, 204, 0.2); }
-    .balance-value { font-size: 36px; font-weight: 800; }
-    
-    .chart-container { margin-top: 20px; width: 100%; height: 200px; }
-    
-    .btn { background: var(--tg-btn); color: var(--tg-btn-text); border: none; padding: 12px 20px; border-radius: 12px; font-weight: 600; width: 100%; font-size: 14px; cursor: pointer; margin-top: 5px; }
-    .btn-secondary { background: transparent; color: var(--tg-text); border: 1px solid rgba(0,0,0,0.15); }
-    .btn-danger { background: #e91e63; color: white; }
-    
-    .input { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.08); background: var(--tg-bg); color: var(--tg-text); font-size: 14px; outline: none; margin-bottom: 10px; }
+        .delete-merch-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            transition: background 0.2s;
+        }
 
-    /* --- МЕРЧ (GRID) --- */
-    .grid { 
-        display: grid; 
-        grid-template-columns: 1fr 1fr; 
-        gap: 12px; 
-        align-items: stretch; 
-    }
-    .merch-item {
-        background: var(--tg-sec-bg);
-        border-radius: 12px;
-        overflow: hidden;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-    }
-    .merch-img { 
-        width: 100%; 
-        aspect-ratio: 1 / 1; 
-        object-fit: cover;
-        object-position: center;
-        background: #eee; 
-        display: block;
-    }
-    .merch-info { 
-        padding: 10px 10px 0 10px; 
-        text-align: center;
-        flex-grow: 1; 
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between; 
-    }
-    .merch-name { 
-        font-weight: 600; 
-        font-size: 13px; 
-        line-height: 1.3;
-        margin-bottom: 6px; 
-        height: 34px; 
-        overflow: hidden;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-    }
-    .merch-price { 
-        color: var(--tg-link); 
-        font-weight: 700; 
-        font-size: 15px;
-    }
-    .merch-stock {
-    font-size: 11px;
-    color: var(--tg-hint);
-    margin-top: 4px;
-}
+        .delete-merch-btn:hover {
+            background: #f44336;
+        }
 
-    /* --- МОДАЛКА --- */
-    .modal-overlay {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.5); z-index: 2000;
-        opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease;
-        display: flex; align-items: flex-end; justify-content: center;
-    }
-    .modal-overlay.open { opacity: 1; visibility: visible; }
-    
-    .modal-content {
-        background: var(--tg-bg); width: 100%; max-width: 600px; max-height: 90vh;
-        border-radius: 20px 20px 0 0; padding: 20px; padding-top: 10px; overflow-y: auto;
-        transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        position: relative;
-    }
-    .modal-overlay.open .modal-content { transform: translateY(0); }
-    
-    .modal-handle { width: 40px; height: 5px; background: rgba(0,0,0,0.2); border-radius: 10px; margin: 0 auto 15px auto; }
-    .modal-img-full { width: 100%; border-radius: 12px; margin-bottom: 15px; object-fit: cover; max-height: 300px; }
-    .modal-title { font-size: 20px; font-weight: 800; margin-bottom: 5px; }
-    .modal-price { font-size: 18px; color: var(--tg-link); font-weight: 700; margin-bottom: 15px; }
-    .spec-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 8px; }
-    .spec-label { color: var(--tg-hint); }
-    .spec-val { font-weight: 500; }
+        /* --- НАВИГАЦИЯ --- */
+        .tabs {
+            display: flex;
+            background: var(--tg-sec-bg);
+            padding-bottom: env(safe-area-inset-bottom);
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            height: 55px;
+        }
 
-    /* --- СПИСКИ --- */
-    .service-item { background: var(--tg-bg); border: 1px solid var(--tg-sec-bg); border-radius: 12px; padding: 15px; margin-bottom: 12px; }
-    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
-    .history-item:last-child { border-bottom: none; }
-    .history-meta { font-size: 12px; color: var(--tg-hint); }
-    .history-amount.earn { color: #4caf50; font-weight: bold; }
-    .history-amount.spend { color: #f44336; font-weight: bold; }
+        .tab {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--tg-hint);
+            transition: color 0.2s;
+        }
 
-    /* --- FAQ --- */
-    .faq-item { border-bottom: 1px solid rgba(0,0,0,0.1); }
-    .faq-question { padding: 16px 0; font-weight: 600; font-size: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-    .faq-question::after { content: '+'; font-size: 18px; color: var(--tg-link); transition: transform 0.2s; }
-    .faq-item.active .faq-question::after { transform: rotate(45deg); }
-    .faq-answer { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; font-size: 14px; color: var(--tg-text); opacity: 0.9; line-height: 1.5; padding: 0; }
-    .faq-item.active .faq-answer { padding-bottom: 16px; }
-    
-    .role-protected { display: none !important; }
-  </style>
+        .tab.active {
+            color: var(--tg-link);
+            background: rgba(0, 0, 0, 0.05);
+            font-weight: 600;
+        }
+
+        /* --- СУБ-ТАБЫ --- */
+        .sub-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            padding: 4px;
+            background: var(--tg-sec-bg);
+            border-radius: 12px;
+        }
+
+        .sub-tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--tg-hint);
+            transition: 0.2s;
+        }
+
+        .sub-tab.active {
+            background: var(--tg-btn);
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .content-section {
+            display: none;
+            padding: 16px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .content-section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .card {
+            background: var(--tg-sec-bg);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .balance-card {
+            background: linear-gradient(135deg, var(--tg-btn), #4facfe);
+            color: white;
+            text-align: center;
+            box-shadow: 0 8px 20px rgba(36, 129, 204, 0.2);
+        }
+
+        .balance-value {
+            font-size: 36px;
+            font-weight: 800;
+        }
+
+        .chart-container {
+            margin-top: 20px;
+            width: 100%;
+            height: 200px;
+        }
+
+        .btn {
+            background: var(--tg-btn);
+            color: var(--tg-btn-text);
+            border: none;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-weight: 600;
+            width: 100%;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--tg-text);
+            border: 1px solid rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-danger {
+            background: #e91e63;
+            color: white;
+        }
+
+        .input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            background: var(--tg-bg);
+            color: var(--tg-text);
+            font-size: 14px;
+            outline: none;
+            margin-bottom: 10px;
+        }
+
+        /* --- МЕРЧ (GRID) --- */
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            align-items: stretch;
+        }
+
+        .merch-item {
+            background: var(--tg-sec-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .merch-img {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: cover;
+            object-position: center;
+            background: #eee;
+            display: block;
+        }
+
+        .merch-info {
+            padding: 10px 10px 0 10px;
+            text-align: center;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .merch-name {
+            font-weight: 600;
+            font-size: 13px;
+            line-height: 1.3;
+            margin-bottom: 6px;
+            height: 34px;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .merch-price {
+            color: var(--tg-link);
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .merch-stock {
+            font-size: 11px;
+            color: var(--tg-hint);
+            margin-top: 4px;
+        }
+
+        /* --- МОДАЛКА --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+
+        .modal-overlay.open {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-content {
+            background: var(--tg-bg);
+            width: 100%;
+            max-width: 600px;
+            max-height: 90vh;
+            border-radius: 20px 20px 0 0;
+            padding: 20px;
+            padding-top: 10px;
+            overflow-y: auto;
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            position: relative;
+        }
+
+        .modal-overlay.open .modal-content {
+            transform: translateY(0);
+        }
+
+        .modal-handle {
+            width: 40px;
+            height: 5px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            margin: 0 auto 15px auto;
+        }
+
+        .modal-img-full {
+            width: 100%;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            object-fit: cover;
+            max-height: 300px;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 800;
+            margin-bottom: 5px;
+        }
+
+        .modal-price {
+            font-size: 18px;
+            color: var(--tg-link);
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+
+        .spec-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .spec-label {
+            color: var(--tg-hint);
+        }
+
+        .spec-val {
+            font-weight: 500;
+        }
+
+        /* --- СПИСКИ --- */
+        .service-item {
+            background: var(--tg-bg);
+            border: 1px solid var(--tg-sec-bg);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+        }
+
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        .history-item:last-child {
+            border-bottom: none;
+        }
+
+        .history-meta {
+            font-size: 12px;
+            color: var(--tg-hint);
+        }
+
+        .history-amount.earn {
+            color: #4caf50;
+            font-weight: bold;
+        }
+
+        .history-amount.spend {
+            color: #f44336;
+            font-weight: bold;
+        }
+
+        /* --- FAQ --- */
+        .faq-item {
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .faq-question {
+            padding: 16px 0;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .faq-question::after {
+            content: '+';
+            font-size: 18px;
+            color: var(--tg-link);
+            transition: transform 0.2s;
+        }
+
+        .faq-item.active .faq-question::after {
+            transform: rotate(45deg);
+        }
+
+        .faq-answer {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            font-size: 14px;
+            color: var(--tg-text);
+            opacity: 0.9;
+            line-height: 1.5;
+            padding: 0;
+        }
+
+        .faq-item.active .faq-answer {
+            padding-bottom: 16px;
+        }
+
+        .role-protected {
+            display: none !important;
+        }
+    </style>
 </head>
+
 <body>
 
-  <!-- ПРОФИЛЬ -->
-  <div id="main" class="content-section active">
-    <div class="card balance-card">
-      <div style="font-size: 14px; opacity: 0.9;">Мой баланс</div>
-      <div class="balance-value" id="balance-display">0</div>
-      <div style="font-size: 12px;">Student Coins (STC)</div>
-    </div>
-    
-    <div class="card">
-      <h4 style="margin-bottom: 10px;">Аналитика</h4>
-      <div class="chart-container"><canvas id="expensesChart"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h4 style="margin-bottom: 10px;">История</h4>
-      <div id="history-list"><div style="text-align:center; color: var(--tg-hint); font-size: 13px;">Загрузка...</div></div>
-    </div>
-
-    <div class="card">
-      <h4 style="margin-bottom: 10px;">Рейтинг</h4>
-      <div id="leaderboard" style="font-size: 14px;"></div>
-    </div>
-  </div>
-
-  <!-- БИРЖА -->
-  <div id="exchange" class="content-section">
-    <div class="sub-tabs">
-        <div class="sub-tab active" onclick="switchExchange('services', this)">Услуги</div>
-        <div class="sub-tab" onclick="switchExchange('activities', this)">События</div>
-    </div>
-
-    <div id="ex-services-block">
-        <button class="btn" onclick="toggleForm('create-service-card')">Разместить услугу</button>
-        <div id="create-service-card" class="card" style="display:none; margin-top: 10px;">
-            <h3>Новая услуга</h3><br>
-            <input id="svc-name" class="input" placeholder="Название">
-            <input id="svc-price" class="input" type="number" placeholder="Цена (STC)">
-            <textarea id="svc-desc" class="input" rows="3" placeholder="Описание"></textarea>
-            <button class="btn" onclick="createService()">Опубликовать</button>
+    <!-- ПРОФИЛЬ -->
+    <div id="main" class="content-section active">
+        <div class="card balance-card">
+            <div style="font-size: 14px; opacity: 0.9;">Мой баланс</div>
+            <div class="balance-value" id="balance-display">0</div>
+            <div style="font-size: 12px;">Student Coins (STC)</div>
         </div>
-        <div id="services-list" style="margin-top: 15px;"></div>
-    </div>
 
-    <div id="ex-activities-block" style="display:none;">
-        <div class="role-protected" id="council-activities-panel">
-            <button class="btn btn-danger" onclick="toggleForm('create-activity-card')">Создать мероприятие</button>
-            <div id="create-activity-card" class="card" style="display:none; margin-top: 10px;">
-                <h3>Новое событие</h3><br>
-                <input id="act-title" class="input" placeholder="Название">
-                <input id="act-points" type="number" class="input" placeholder="Награда">
-                <input id="act-date" type="date" class="input">
-                <button class="btn btn-danger" onclick="createActivity()">Создать</button>
+        <div class="card">
+            <h4 style="margin-bottom: 10px;">Аналитика</h4>
+            <div class="chart-container"><canvas id="expensesChart"></canvas></div>
+        </div>
+
+        <div class="card">
+            <h4 style="margin-bottom: 10px;">История</h4>
+            <div id="history-list">
+                <div style="text-align:center; color: var(--tg-hint); font-size: 13px;">Загрузка...</div>
             </div>
         </div>
-        <div id="activities-list" style="margin-top: 15px;"></div>
-    </div>
-  </div>
 
-  <!-- МЕРЧ -->
-  <div id="merch" class="content-section">
-    <h3 style="margin-bottom: 15px;">Магазин</h3>
-    
-    <div class="role-protected" id="council-merch-panel" style="margin-bottom: 15px;">
-        <button class="btn" onclick="toggleForm('add-merch-card')">Добавить товар</button>
-                <div id="add-merch-card" class="card" style="display:none; margin-top: 10px;">
-            <input id="m-name" class="input" placeholder="Название">
-            <input id="m-price" type="number" class="input" placeholder="Цена">
-            <input id="m-stock" type="number" class="input" placeholder="Количество">
-            <div style="font-size:12px; color:var(--tg-hint); margin-bottom:5px;">Фото товара:</div>
-            <input id="m-file" type="file" class="input" accept="image/*">
-            <button class="btn" onclick="addMerch()">Добавить</button>
+        <div class="card">
+            <h4 style="margin-bottom: 10px;">Рейтинг</h4>
+            <div id="leaderboard" style="font-size: 14px;"></div>
         </div>
     </div>
+
+    <!-- БИРЖА -->
+    <div id="exchange" class="content-section">
+        <div class="sub-tabs">
+            <div class="sub-tab active" onclick="switchExchange('services', this)">Услуги</div>
+            <div class="sub-tab" onclick="switchExchange('activities', this)">События</div>
+            <!-- 🔥 Новая кнопка АУКЦИОНЫ 🔥 -->
+            <div class="sub-tab" onclick="switchExchange('auctions', this)" style="position: relative;">
+                Аукционы
+                <span id="auction-badge"
+                    style="position: absolute; top: -5px; right: 5px; background: red; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; display: none;">0</span>
+            </div>
+        </div>
+
+        <div id="ex-services-block">
+            <button class="btn" onclick="toggleForm('create-service-card')">Разместить услугу</button>
+            <div id="create-service-card" class="card" style="display:none; margin-top: 10px;">
+                <h3>Новая услуга</h3><br>
+                <input id="svc-name" class="input" placeholder="Название">
+                <input id="svc-price" class="input" type="number" placeholder="Цена (STC)">
+                <textarea id="svc-desc" class="input" rows="3" placeholder="Описание"></textarea>
+                <button class="btn" onclick="createService()">Опубликовать</button>
+            </div>
+            <div id="services-list" style="margin-top: 15px;"></div>
+        </div>
+
+        <div id="ex-activities-block" style="display:none;">
+            <div class="role-protected" id="council-activities-panel">
+                <button class="btn btn-danger" onclick="toggleForm('create-activity-card')">Создать мероприятие</button>
+                <div id="create-activity-card" class="card" style="display:none; margin-top: 10px;">
+                    <h3>Новое событие</h3><br>
+                    <input id="act-title" class="input" placeholder="Название">
+                    <input id="act-points" type="number" class="input" placeholder="Награда">
+                    <input id="act-date" type="date" class="input">
+                    <button class="btn btn-danger" onclick="createActivity()">Создать</button>
+                </div>
+            </div>
+            <div id="activities-list" style="margin-top: 15px;"></div>
+        </div>
+        <div id="ex-auctions-block" style="display:none;">
+
+            <!-- Панель Студсовета (Создать лот) -->
+            <div class="role-protected" id="council-auctions-panel" style="display: none;">
+                <button class="btn" style="background: #ff9800; color: white;"
+                    onclick="toggleForm('create-auction-card')">Выставить лот</button>
+                <div id="create-auction-card" class="card"
+                    style="display:none; margin-top: 10px; border: 2px solid #ff9800;">
+                    <input id="auc-title" class="input" placeholder="Название лота (напр. Шавуха)">
+                    <input id="auc-price" type="number" class="input" placeholder="Стартовая цена">
+                    <textarea id="auc-desc" class="input" rows="2" placeholder="Описание..."></textarea>
+                    <div style="font-size:12px; color:var(--tg-hint); margin-bottom:5px;">Закончится:</div>
+                    <input id="auc-time" type="datetime-local" class="input">
+                    <button class="btn" style="background: #ff9800;" onclick="submitNewAuction()">Начать торги!</button>
+                </div>
+            </div>
+
+            <!-- Список лотов -->
+            <div id="auctions-list" style="margin-top: 15px;"></div>
+        </div>
+    </div>
+    </div>
+
+    <!-- МЕРЧ -->
+    <div id="merch" class="content-section">
+        <h3 style="margin-bottom: 15px;">Магазин</h3>
+
+        <div class="role-protected" id="council-merch-panel" style="margin-bottom: 15px;">
+            <button class="btn" onclick="toggleForm('add-merch-card')">Добавить товар</button>
+            <div id="add-merch-card" class="card" style="display:none; margin-top: 10px;">
+                <input id="m-name" class="input" placeholder="Название">
+                <input id="m-price" type="number" class="input" placeholder="Цена">
+                <input id="m-stock" type="number" class="input" placeholder="Количество">
+                <div style="font-size:12px; color:var(--tg-hint); margin-bottom:5px;">Фото товара:</div>
+                <input id="m-file" type="file" class="input" accept="image/*">
+                <button class="btn" onclick="addMerch()">Добавить</button>
+            </div>
+        </div>
 
         <!-- ПАНЕЛЬ СТУДСОВЕТА: ЗАЯВКИ -->
-    <div id="council-orders-panel" class="role-protected card" style="display:none; border: 2px solid #ff9800;">
-        <h4>Заявки на мерч</h4>
-        <div id="council-orders-list" style="margin-top:10px;">Загрузка...</div>
+        <div id="council-orders-panel" class="role-protected card" style="display:none; border: 2px solid #ff9800;">
+            <h4>Заявки на мерч</h4>
+            <div id="council-orders-list" style="margin-top:10px;">Загрузка...</div>
+        </div>
+
+        <!-- МОИ ЗАКАЗЫ (Для всех) -->
+        <div id="my-merch-orders" class="card" style="display:none; border: 2px solid #4caf50;">
+            <h4> Мои покупки</h4>
+            <div id="my-orders-list" style="margin-top:10px;"></div>
+        </div>
+
+        <div id="merch-grid" class="grid">Загрузка...</div>
     </div>
 
-    <!-- МОИ ЗАКАЗЫ (Для всех) -->
-    <div id="my-merch-orders" class="card" style="display:none; border: 2px solid #4caf50;">
-        <h4> Мои покупки</h4>
-        <div id="my-orders-list" style="margin-top:10px;"></div>
+    <!-- FAQ -->
+    <div id="faq" class="content-section">
+        <h3 style="margin-bottom: 15px;">Вопросы и ответы</h3>
+
+        <div class="faq-item" onclick="toggleFaq(this)">
+            <div class="faq-question">Что такое Student Coins?</div>
+            <div class="faq-answer">Это внутренняя валюта для студентов. Зарабатывай баллы за активность в университете
+                и трать их на реальные вещи или услуги.</div>
+        </div>
+        <div class="faq-item" onclick="toggleFaq(this)">
+            <div class="faq-question">За что начисляются баллы?</div>
+            <div class="faq-answer">За учебные достижения, участие в мероприятиях, конференциях и организаторскую
+                деятельность.</div>
+        </div>
+        <div class="faq-item" onclick="toggleFaq(this)">
+            <div class="faq-question">Где посмотреть историю операций?</div>
+            <div class="faq-answer">В приложении на вкладке «Профиль». Там видны все начисления и списания.</div>
+        </div>
+        <div class="faq-item" onclick="toggleFaq(this)">
+            <div class="faq-question">Как купить мерч?</div>
+            <div class="faq-answer">Перейди во вкладку «Мерч», выбери товар и нажми «Заказать». Если баллов хватает,
+                товар забронируется за тобой.</div>
+        </div>
+        <div class="faq-item" onclick="toggleFaq(this)">
+            <div class="faq-question">Что такое «Биржа»?</div>
+            <div class="faq-answer">Это площадка, где студенты помогают друг другу. Ты можешь купить услугу у другого
+                студента или заработать, выполнив задание.</div>
+        </div>
+        <div class="faq-item" onclick="toggleFaq(this)">
+            <div class="faq-question">Разработчикам: Как подключить оплату?</div>
+            <div class="faq-answer">
+                Подключите скрипт <code>student-coins-sdk.js</code> на свой сайт.
+                Используйте метод <code>StudentCoins.init(API_KEY)</code> для входа и
+                <code>StudentCoins.createPayButton()</code> для создания кнопки оплаты.
+                <br><br>
+                За документацией и ключом API обратитесь к администраторам.
+            </div>
+        </div>
+
+
     </div>
 
-    <div id="merch-grid" class="grid">Загрузка...</div>
-  </div>
-
-  <!-- FAQ -->
-  <div id="faq" class="content-section">
-    <h3 style="margin-bottom: 15px;">Вопросы и ответы</h3>
-    
-    <div class="faq-item" onclick="toggleFaq(this)">
-        <div class="faq-question">Что такое Student Coins?</div>
-        <div class="faq-answer">Это внутренняя валюта для студентов. Зарабатывай баллы за активность в университете и трать их на реальные вещи или услуги.</div>
-    </div>
-    <div class="faq-item" onclick="toggleFaq(this)">
-        <div class="faq-question">За что начисляются баллы?</div>
-        <div class="faq-answer">За учебные достижения, участие в мероприятиях, конференциях и организаторскую деятельность.</div>
-    </div>
-    <div class="faq-item" onclick="toggleFaq(this)">
-        <div class="faq-question">Где посмотреть историю операций?</div>
-        <div class="faq-answer">В приложении на вкладке «Профиль». Там видны все начисления и списания.</div>
-    </div>
-    <div class="faq-item" onclick="toggleFaq(this)">
-        <div class="faq-question">Как купить мерч?</div>
-        <div class="faq-answer">Перейди во вкладку «Мерч», выбери товар и нажми «Заказать». Если баллов хватает, товар забронируется за тобой.</div>
-    </div>
-    <div class="faq-item" onclick="toggleFaq(this)">
-        <div class="faq-question">Что такое «Биржа»?</div>
-        <div class="faq-answer">Это площадка, где студенты помогают друг другу. Ты можешь купить услугу у другого студента или заработать, выполнив задание.</div>
-    </div>
-    <div class="faq-item" onclick="toggleFaq(this)">
-        <div class="faq-question">Разработчикам: Как подключить оплату?</div>
-        <div class="faq-answer">
-            Подключите скрипт <code>student-coins-sdk.js</code> на свой сайт. 
-            Используйте метод <code>StudentCoins.init(API_KEY)</code> для входа и <code>StudentCoins.createPayButton()</code> для создания кнопки оплаты.
-            <br><br>
-            За документацией и ключом API обратитесь к администраторам.
+    <!-- АДМИНКА -->
+    <div id="admin" class="content-section role-protected">
+        <h3>Администрирование</h3>
+        <div class="card">
+            <div id="admin-stats">Загрузка...</div>
         </div>
     </div>
 
-
-  </div>
-
-  <!-- АДМИНКА -->
-  <div id="admin" class="content-section role-protected">
-    <h3>Администрирование</h3>
-    <div class="card">
-        <div id="admin-stats">Загрузка...</div>
+    <!-- НИЖНЕЕ МЕНЮ -->
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('main', this)">Профиль</div>
+        <div class="tab" onclick="showTab('exchange', this)">Биржа</div>
+        <div class="tab" onclick="showTab('merch', this)">Мерч</div>
+        <div class="tab" onclick="showTab('faq', this)">FAQ</div>
+        <div class="tab role-protected" id="tab-admin" onclick="showTab('admin', this)">Админ</div>
     </div>
-  </div>
 
-  <!-- НИЖНЕЕ МЕНЮ -->
-  <div class="tabs">
-    <div class="tab active" onclick="showTab('main', this)">Профиль</div>
-    <div class="tab" onclick="showTab('exchange', this)">Биржа</div>
-    <div class="tab" onclick="showTab('merch', this)">Мерч</div>
-    <div class="tab" onclick="showTab('faq', this)">FAQ</div>
-    <div class="tab role-protected" id="tab-admin" onclick="showTab('admin', this)">Админ</div>
-  </div>
+    <!-- МОДАЛЬНОЕ ОКНО -->
+    <div id="merch-modal" class="modal-overlay" onclick="handleOverlayClick(event)">
+        <div class="modal-content" id="modal-content-card">
+            <div class="modal-handle"></div>
+            <img id="modal-img" src="" class="modal-img-full">
+            <div id="modal-title" class="modal-title">Товар</div>
+            <div id="modal-price" class="modal-price">0 STC</div>
 
-  <!-- МОДАЛЬНОЕ ОКНО -->
-  <div id="merch-modal" class="modal-overlay" onclick="handleOverlayClick(event)">
-      <div class="modal-content" id="modal-content-card">
-          <div class="modal-handle"></div>
-          <img id="modal-img" src="" class="modal-img-full">
-          <div id="modal-title" class="modal-title">Товар</div>
-          <div id="modal-price" class="modal-price">0 STC</div>
-          
-          <div class="spec-row">
-              <span class="spec-label">Материал</span>
-              <span class="spec-val" id="modal-material">Хлопок 100%</span>
-          </div>
-          <div class="spec-row">
-              <span class="spec-label">Размеры</span>
-              <span class="spec-val" id="modal-sizes">S, M, L, XL</span>
-          </div>
-          <div class="spec-row" style="border:none;">
-              <span class="spec-label">Статус</span>
-              <span class="spec-val" id="modal-status" style="color:green;">В наличии</span>
-          </div>
+            <div class="spec-row">
+                <span class="spec-label">Материал</span>
+                <span class="spec-val" id="modal-material">Хлопок 100%</span>
+            </div>
+            <div class="spec-row">
+                <span class="spec-label">Размеры</span>
+                <span class="spec-val" id="modal-sizes">S, M, L, XL</span>
+            </div>
+            <div class="spec-row" style="border:none;">
+                <span class="spec-label">Статус</span>
+                <span class="spec-val" id="modal-status" style="color:green;">В наличии</span>
+            </div>
 
-          <button class="btn" style="margin-top: 20px;" onclick="buyCurrentMerch()">Заказать</button>
-          <button class="btn btn-secondary" style="margin-top: 10px;" onclick="closeMerchModal()">Закрыть</button>
-      </div>
-  </div>
+            <button class="btn" style="margin-top: 20px;" onclick="buyCurrentMerch()">Заказать</button>
+            <button class="btn btn-secondary" style="margin-top: 10px;" onclick="closeMerchModal()">Закрыть</button>
+        </div>
+    </div>
 
     <script>
-    const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
-    if (tg) tg.expand();
+        const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+        if (tg) tg.expand();
 
-    const userId = new URLSearchParams(window.location.search).get('user_id');
-    let currentUserRole = 'student';
-    let myChart = null;
-    let currentMerchId = null;
+        const userId = new URLSearchParams(window.location.search).get('user_id');
+        let currentUserRole = 'student';
+        let myChart = null;
+        let currentMerchId = null;
 
-    // --- INIT ---
-    function init() {
-        if(!userId) return alert('No user_id');
-        fetch(`/api/user/${userId}`).then(r => r.json()).then(u => {
-            document.getElementById('balance-display').innerText = u.current_points;
-            currentUserRole = u.role || 'student';
-            applyRoleRights();
-            updateAllData();
-        });
-    }
+        // --- INIT ---
+        function init() {
+            if (!userId) return alert('No user_id');
+            fetch(`/api/user/${userId}`).then(r => r.json()).then(u => {
+                document.getElementById('balance-display').innerText = u.current_points;
+                currentUserRole = u.role || 'student';
+                applyRoleRights();
+                updateAllData();
+            });
+        }
 
         function applyRoleRights() {
-        const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
-        const isAdmin = (currentUserRole === 'admin');
-        
-        if (isStaff) {
-            document.getElementById('council-activities-panel').classList.remove('role-protected');
-            document.getElementById('council-merch-panel').classList.remove('role-protected');
-            
-            document.getElementById('council-orders-panel').classList.remove('role-protected');
-        }
-        
-        if (isAdmin) {
-            document.getElementById('tab-admin').classList.remove('role-protected');
-            document.getElementById('admin').classList.remove('role-protected');
-        }
-    }
+            const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
+            const isAdmin = (currentUserRole === 'admin');
 
-
-    // --- NAVIGATION ---
-    function showTab(id, el) {
-        document.querySelectorAll('.content-section').forEach(s => {
-            if(s.id === 'admin' && currentUserRole !== 'admin') return; 
-            s.classList.remove('active');
-        });
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.getElementById(id).classList.add('active');
-        el.classList.add('active');
-        
-        if(id === 'main') updateAllData();
-        if(id === 'exchange') loadServices();
-        if(id === 'merch') loadMerch();
-        if(id === 'admin') loadAdminStats();
-    }
-
-    function switchExchange(type, el) {
-        document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
-        el.classList.add('active');
-        document.getElementById('ex-services-block').style.display = (type === 'services') ? 'block' : 'none';
-        document.getElementById('ex-activities-block').style.display = (type === 'activities') ? 'block' : 'none';
-        
-        if(type === 'services') loadServices();
-        if(type === 'activities') loadActivities();
-    }
-
-    function toggleForm(id) {
-        const f = document.getElementById(id);
-        f.style.display = (f.style.display === 'none') ? 'block' : 'none';
-    }
-    
-    function toggleFaq(el) {
-        document.querySelectorAll('.faq-item.active').forEach(item => {
-            if (item !== el) {
-                item.classList.remove('active');
-                item.querySelector('.faq-answer').style.maxHeight = null;
+            // 1. Права для мерча и активностей
+            if (isStaff) {
+                document.getElementById('council-activities-panel')?.classList.remove('role-protected');
+                document.getElementById('council-merch-panel')?.classList.remove('role-protected');
+                document.getElementById('council-orders-panel')?.classList.remove('role-protected');
             }
-        });
-        el.classList.toggle('active');
-        const answer = el.querySelector('.faq-answer');
-        if (el.classList.contains('active')) {
-            answer.style.maxHeight = answer.scrollHeight + 20 + "px";
-        } else {
-            answer.style.maxHeight = null;
+
+            // 2. Права для админ-панели
+            if (isAdmin) {
+                document.getElementById('tab-admin')?.classList.remove('role-protected');
+                document.getElementById('admin')?.classList.remove('role-protected');
+            }
+
+            // 3. 🔥 ПРАВА ДЛЯ АУКЦИОНОВ (Резня для студентов) 🔥
+            const auctionPanel = document.getElementById('council-auctions-panel');
+            if (auctionPanel) {
+                if (isStaff) {
+                    // Если Студсовет - показываем кнопку "Выставить лот"
+                    auctionPanel.classList.remove('role-protected');
+                    auctionPanel.style.display = 'block';
+                } else {
+                    // ЕСЛИ СТУДЕНТ - ВЫРЕЗАЕМ ИЗ HTML С КОРНЯМИ
+                    auctionPanel.remove();
+                }
+            }
         }
-    }
 
-    // --- MODAL LOGIC ---
-    const modalOverlay = document.getElementById('merch-modal');
-    const modalContent = document.getElementById('modal-content-card');
-    let startY = 0;
-    let currentY = 0;
+        // --- NAVIGATION ---
+        function showTab(id, el) {
+            document.querySelectorAll('.content-section').forEach(s => {
+                if (s.id === 'admin' && currentUserRole !== 'admin') return;
+                s.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            el.classList.add('active');
 
-    function openMerchModal(id, title, price, imgUrl) {
-        currentMerchId = id;
-        document.getElementById('modal-title').innerText = title;
-        document.getElementById('modal-price').innerText = price + ' STC';
-        document.getElementById('modal-img').src = imgUrl || 'https://via.placeholder.com/300';
-        
-        modalContent.style.transform = ''; 
-        modalOverlay.classList.add('open');
-    }
+            if (id === 'main') updateAllData();
+            if (id === 'exchange') loadServices();
+            if (id === 'merch') loadMerch();
+            if (id === 'admin') loadAdminStats();
+        }
 
-    function closeMerchModal() {
-        modalOverlay.classList.remove('open');
-        setTimeout(() => { modalContent.style.transform = ''; }, 300);
-    }
+        function switchExchange(type, el) {
+            document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
 
-    function handleOverlayClick(event) {
-        if (event.target === modalOverlay) closeMerchModal();
-    }
+            // Скрываем/показываем нужные блоки
+            document.getElementById('ex-services-block').style.display = (type === 'services') ? 'block' : 'none';
+            document.getElementById('ex-activities-block').style.display = (type === 'activities') ? 'block' : 'none';
+            document.getElementById('ex-auctions-block').style.display = (type === 'auctions') ? 'block' : 'none';
 
-    modalContent.addEventListener('touchstart', (e) => {
-        if (modalContent.scrollTop > 0) return;
-        startY = e.touches[0].clientY;
-        modalContent.style.transition = 'none';
-    }, {passive: true});
+            // Подгружаем данные
+            if (type === 'services') loadServices();
+            if (type === 'activities') loadActivities();
+            if (type === 'auctions') loadAuctions(); // Вызываем загрузку аукционов!
+        }
 
-    modalContent.addEventListener('touchmove', (e) => {
-        if (modalContent.scrollTop > 0) return;
-        currentY = e.touches[0].clientY;
-        const diff = currentY - startY;
-        if (diff > 0) modalContent.style.transform = `translateY(${diff}px)`;
-    }, {passive: true});
 
-    modalContent.addEventListener('touchend', (e) => {
-        const diff = currentY - startY;
-        modalContent.style.transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
-        if (diff > 120 && modalContent.scrollTop <= 0) closeMerchModal();
-        else modalContent.style.transform = '';
-        startY = 0; currentY = 0;
-    });
+        function toggleForm(id) {
+            const f = document.getElementById(id);
+            f.style.display = (f.style.display === 'none') ? 'block' : 'none';
+        }
 
-    // --- LOADERS ---
-    function updateAllData() {
-        fetch(`/api/stats/${userId}`).then(r => r.json()).then(stats => renderChart(stats));
-        fetch(`/api/leaderboard`).then(r => r.json()).then(list => {
-            document.getElementById('leaderboard').innerHTML = list.map((s, i) => 
-                `<div style="display:flex; justify-content:space-between; padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                    <span>${i+1}. ${s.first_name}</span><b>${s.current_points}</b>
-                </div>`).join('');
+        function toggleFaq(el) {
+            document.querySelectorAll('.faq-item.active').forEach(item => {
+                if (item !== el) {
+                    item.classList.remove('active');
+                    item.querySelector('.faq-answer').style.maxHeight = null;
+                }
+            });
+            el.classList.toggle('active');
+            const answer = el.querySelector('.faq-answer');
+            if (el.classList.contains('active')) {
+                answer.style.maxHeight = answer.scrollHeight + 20 + "px";
+            } else {
+                answer.style.maxHeight = null;
+            }
+        }
+
+        // --- MODAL LOGIC ---
+        const modalOverlay = document.getElementById('merch-modal');
+        const modalContent = document.getElementById('modal-content-card');
+        let startY = 0;
+        let currentY = 0;
+
+        function openMerchModal(id, title, price, imgUrl) {
+            currentMerchId = id;
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-price').innerText = price + ' STC';
+            document.getElementById('modal-img').src = imgUrl || 'https://via.placeholder.com/300';
+
+            modalContent.style.transform = '';
+            modalOverlay.classList.add('open');
+        }
+
+        function closeMerchModal() {
+            modalOverlay.classList.remove('open');
+            setTimeout(() => { modalContent.style.transform = ''; }, 300);
+        }
+
+        function handleOverlayClick(event) {
+            if (event.target === modalOverlay) closeMerchModal();
+        }
+
+        modalContent.addEventListener('touchstart', (e) => {
+            if (modalContent.scrollTop > 0) return;
+            startY = e.touches[0].clientY;
+            modalContent.style.transition = 'none';
+        }, { passive: true });
+
+        modalContent.addEventListener('touchmove', (e) => {
+            if (modalContent.scrollTop > 0) return;
+            currentY = e.touches[0].clientY;
+            const diff = currentY - startY;
+            if (diff > 0) modalContent.style.transform = `translateY(${diff}px)`;
+        }, { passive: true });
+
+        modalContent.addEventListener('touchend', (e) => {
+            const diff = currentY - startY;
+            modalContent.style.transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+            if (diff > 120 && modalContent.scrollTop <= 0) closeMerchModal();
+            else modalContent.style.transform = '';
+            startY = 0; currentY = 0;
         });
-        loadHistory();
-    }
 
-    function loadHistory() {
-        fetch(`/api/history/${userId}`).then(r => r.json()).then(data => {
-            document.getElementById('history-list').innerHTML = data.map(item => `
+        // --- LOADERS ---
+        function updateAllData() {
+            fetch(`/api/stats/${userId}`).then(r => r.json()).then(stats => renderChart(stats));
+            fetch(`/api/leaderboard`).then(r => r.json()).then(list => {
+                document.getElementById('leaderboard').innerHTML = list.map((s, i) =>
+                    `<div style="display:flex; justify-content:space-between; padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                    <span>${i + 1}. ${s.first_name}</span><b>${s.current_points}</b>
+                </div>`).join('');
+            });
+            loadHistory();
+        }
+
+        function loadHistory() {
+            fetch(`/api/history/${userId}`).then(r => r.json()).then(data => {
+                document.getElementById('history-list').innerHTML = data.map(item => `
                 <div class="history-item">
                     <div>
                         <div style="font-weight: 500; font-size: 13px;">${item.description}</div>
@@ -518,44 +808,44 @@
                     <div class="history-amount ${item.type}">${item.type === 'earn' ? '+' : '-'}${item.amount}</div>
                 </div>
             `).join('');
-        });
-    }
-    
-    function loadServices() {
-        fetch(`/api/services?user_id=${userId}`)
-            .then(r => r.json())
-            .then(data => {
-                // Включаем логи для QA! Посмотри в консоль браузера
-                console.log("Данные с бэка:", data);
+            });
+        }
 
-                document.getElementById('services-list').innerHTML = data.map(s => {
-                    
-                    // 🔥 ТЕРМИНАТОР-ФИКС ДЛЯ ACTIVE 🔥
-                    // Если там 1, '1', true или 'true' — всё сожрёт.
-                    const isActive = (s.active == 1 || s.active === true || s.active === '1' || s.is_active === true);
-                    
-                    // Статус лейбл
-                    let statusLabel = 'Поиск исполнителя';
-                    if (!isActive) {
-                        statusLabel = 'Завершено';
-                    } else if (s.status === 'in_progress' || s.status === 'pending') {
-                        statusLabel = 'В работе';
-                    }
+        function loadServices() {
+            fetch(`/api/services?user_id=${userId}`)
+                .then(r => r.json())
+                .then(data => {
+                    // Включаем логи для QA! Посмотри в консоль браузера
+                    console.log("Данные с бэка:", data);
 
-                    // Кнопки
-                    let actionBtn = '';
-                    
-                    // Условие появления кнопки "Взять"
-                    if (isActive && !s.is_my_task && (s.status === 'open' || !s.status)) {
-                        actionBtn = `<button class="btn" style="padding:6px; font-size:12px;" onclick="takeTask('${s.id}')">Взять</button>`;
-                    }
-                    
-                    // Кнопка для заказчика
-                    if (s.is_my_task && (s.status === 'in_progress' || s.status === 'pending')) {
-                        actionBtn = `<button class="btn" style="padding:6px; font-size:12px; background:#4caf50;" onclick="confirmTask('${s.order_id}')">Принять работу</button>`;
-                    }
+                    document.getElementById('services-list').innerHTML = data.map(s => {
 
-                    return `
+                        // 🔥 ТЕРМИНАТОР-ФИКС ДЛЯ ACTIVE 🔥
+                        // Если там 1, '1', true или 'true' — всё сожрёт.
+                        const isActive = (s.active == 1 || s.active === true || s.active === '1' || s.is_active === true);
+
+                        // Статус лейбл
+                        let statusLabel = 'Поиск исполнителя';
+                        if (!isActive) {
+                            statusLabel = 'Завершено';
+                        } else if (s.status === 'in_progress' || s.status === 'pending') {
+                            statusLabel = 'В работе';
+                        }
+
+                        // Кнопки
+                        let actionBtn = '';
+
+                        // Условие появления кнопки "Взять"
+                        if (isActive && !s.is_my_task && (s.status === 'open' || !s.status)) {
+                            actionBtn = `<button class="btn" style="padding:6px; font-size:12px;" onclick="takeTask('${s.id}')">Взять</button>`;
+                        }
+
+                        // Кнопка для заказчика
+                        if (s.is_my_task && (s.status === 'in_progress' || s.status === 'pending')) {
+                            actionBtn = `<button class="btn" style="padding:6px; font-size:12px; background:#4caf50;" onclick="confirmTask('${s.order_id}')">Принять работу</button>`;
+                        }
+
+                        return `
                         <div class="service-item" style="${!isActive ? 'opacity:0.6;' : ''}">
                             <div style="display:flex; justify-content:space-between;">
                                 <div>
@@ -570,58 +860,164 @@
                             </div>
                         </div>
                     `;
-                }).join('');
-            });
-    }
+                    }).join('');
+                });
+        }
 
-    function takeTask(serviceId) {
-        if (!confirm("Уверен, что хочешь взять эту задачу?")) return;
+        function takeTask(serviceId) {
+            if (!confirm("Уверен, что хочешь взять эту задачу?")) return;
 
-        fetch('/api/services/take', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                service_id: serviceId, 
-                user_id: userId // userId у тебя уже есть глобально, раз он юзается в loadServices
+            fetch('/api/services/take', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    service_id: serviceId,
+                    user_id: userId // userId у тебя уже есть глобально, раз он юзается в loadServices
+                })
             })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                alert("Задача успешно взята в работу!");
-                loadServices(); // Перезагружаем список, чтобы кнопка пропала и появился статус
-            } else {
-                alert("Ошибка: " + data.message);
-            }
-        })
-        .catch(err => console.error("Ошибка сети:", err));
-    }
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert("Задача успешно взята в работу!");
+                        loadServices(); // Перезагружаем список, чтобы кнопка пропала и появился статус
+                    } else {
+                        alert("Ошибка: " + data.message);
+                    }
+                })
+                .catch(err => console.error("Ошибка сети:", err));
+        }
 
-    function loadActivities() {
-        fetch('/api/activities').then(r => r.json()).then(data => {
-            if(data.length === 0) return document.getElementById('activities-list').innerHTML = '<div style="text-align:center; padding:10px;">Событий нет</div>';
-            document.getElementById('activities-list').innerHTML = data.map(a => `
+        function loadActivities() {
+            fetch('/api/activities').then(r => r.json()).then(data => {
+                if (data.length === 0) return document.getElementById('activities-list').innerHTML = '<div style="text-align:center; padding:10px;">Событий нет</div>';
+                document.getElementById('activities-list').innerHTML = data.map(a => `
                 <div class="service-item" style="border-left: 4px solid #e91e63;">
                     <div style="font-weight:bold;">${a.title}</div>
                     <div style="font-size:13px; margin:5px 0;">${a.date} | +${a.points} STC</div>
                     <button class="btn btn-danger" style="padding:8px;" onclick="uiAlert('Вы записались!')">Участвовать</button>
                 </div>
             `).join('');
-        });
-    }
+            });
+        }
 
-    // --- MERCH LOGIC (UPDATED) ---
+        // Открываем права на создание лота Студсовету или УДАЛЯЕМ кнопку у студентов
+        const oldApplyRoleRights = applyRoleRights;
+        applyRoleRights = function () {
+            oldApplyRoleRights(); // Вызываем старые права (для мерча и услуг)
 
-    function loadMerch() {
-    // 1. Загрузка товаров
-    fetch('/api/merch').then(r => r.json()).then(data => {
-        const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
-        document.getElementById('merch-grid').innerHTML = data.map(m => {
-            const deleteButton = isStaff ? `<button class="delete-merch-btn" onclick="event.stopPropagation(); deleteMerch('${m.id}')">×</button>` : '';
-            return `
+            const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
+            const auctionPanel = document.getElementById('council-auctions-panel');
+
+            if (auctionPanel) {
+                if (isStaff) {
+                    // Если Студсовет - показываем кнопку
+                    auctionPanel.classList.remove('role-protected');
+                    auctionPanel.style.display = 'block';
+                } else {
+                    // 🔥 ЕСЛИ СТУДЕНТ - ВЫРЕЗАЕМ КНОПКУ И ФОРМУ ИЗ HTML С КОРНЯМИ 🔥
+                    auctionPanel.remove();
+                }
+            }
+        }
+
+
+        // Загрузка счетчика на бейджик (в таб)
+        function loadAuctionCount() {
+            fetch('/api/auctions/count').then(r => r.json()).then(data => {
+                const badge = document.getElementById('auction-badge');
+                if (data.count > 0) {
+                    badge.innerText = data.count;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            });
+        }
+        // Вызываем сразу и потом каждые 30 сек
+        setTimeout(loadAuctionCount, 500);
+        setInterval(loadAuctionCount, 30000);
+
+        // Подгрузка списка лотов
+        function loadAuctions() {
+            document.getElementById('auctions-list').innerHTML = '<div style="text-align:center; color:gray;">Грузим...</div>';
+
+            fetch('/api/auctions').then(r => r.json()).then(data => {
+                const list = document.getElementById('auctions-list');
+
+                if (data.length === 0) {
+                    list.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--tg-hint);">
+                    <span style="font-size:30px;">🕸️</span><br>Пока лотов нет. Жди подгона от Студсовета!
+                </div>`;
+                    return;
+                }
+
+                list.innerHTML = data.map(auc => {
+                    const currentPrice = auc.current_bid > 0 ? auc.current_bid : auc.start_price;
+                    const img = auc.image_url || 'https://via.placeholder.com/300x150?text=Аукцион';
+
+                    return `
+                <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 15px; border: 1px solid rgba(255, 152, 0, 0.3);">
+                    <img src="${img}" style="width: 100%; height: 120px; object-fit: cover; display: block; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                    <div style="padding: 12px;">
+                        <div style="font-weight: 600; font-size: 15px; margin-bottom: 4px;">${auc.title}</div>
+                        <div style="font-size: 12px; color: var(--tg-hint); margin-bottom: 12px;">${auc.description}</div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+                            <div>
+                                <div style="font-size: 16px; color: #ff9800; font-weight: bold;">${currentPrice} STC</div>
+                                <div style="font-size: 11px; color: #e91e63;">⏰ ${auc.end_time}</div>
+                            </div>
+                            <button class="btn" style="width: auto; padding: 6px 12px; font-size: 12px; background: #ff9800; border-radius: 8px;" onclick="window.location.href='/auction_detail?id=${auc.id}&user_id=${userId}'">
+                                Ставка ➡️
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+                }).join('');
+            });
+        }
+
+        // Создание лота Студсоветом
+        function submitNewAuction() {
+            const title = document.getElementById('auc-title').value;
+            const price = document.getElementById('auc-price').value;
+            const time = document.getElementById('auc-time').value;
+            const desc = document.getElementById('auc-desc').value;
+
+            if (!title || !price || !time) return uiAlert("Заполни название, цену и время!");
+
+            fetch('/api/auctions/create_custom', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    name: title,
+                    start_price: price,
+                    end_time: time,
+                    description: desc
+                })
+            }).then(r => r.json()).then(res => {
+                uiAlert(res.message);
+                if (res.success) {
+                    toggleForm('create-auction-card'); // Скрываем форму
+                    loadAuctions(); // Обновляем ленту лотов
+                    loadAuctionCount(); // Обновляем бейджик
+                }
+            });
+        }
+
+
+        // --- MERCH LOGIC (UPDATED) ---
+
+        function loadMerch() {
+            // 1. Загрузка товаров
+            fetch('/api/merch').then(r => r.json()).then(data => {
+                const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
+                document.getElementById('merch-grid').innerHTML = data.map(m => {
+                    const deleteButton = isStaff ? `<button class="delete-merch-btn" onclick="event.stopPropagation(); deleteMerch('${m.id}')">×</button>` : '';
+                    return `
                 <div class="merch-item" style="position: relative;" onclick="openMerchModal('${m.id}', '${m.name}', ${m.price_points}, '${m.image_url || ''}')"> 
                     ${deleteButton}
-                    <img src="${m.image_url || '/static/merch_placeholder.png'}" class="merch-img" onerror="this.src='https://via.placeholder.com/150'">
+                    <img src="${m.image_url || '/static/merch_placeholder.png'}" class="merch-img" onerror="this.src=''">
                     <div class="merch-info">
                         <div class="merch-name">${m.name}</div>
                         <div class="merch-price">${m.price_points} STC</div>
@@ -629,45 +1025,45 @@
                     </div>
                 </div>
             `;
-        }).join('');
-    });
+                }).join('');
+            });
 
-    // 2. Загрузка моих покупок
-    loadMyOrders();
+            // 2. Загрузка моих покупок
+            loadMyOrders();
 
-    // 3. Загрузка заявок (если Студсовет)
-    if (['admin', 'stud_council'].includes(currentUserRole)) {
-        document.getElementById('council-orders-panel').style.display = 'block';
-        loadCouncilOrders();
-    }
-}
-function deleteMerch(merchId) {
-    uiConfirm('Удалить этот товар?', (ok) => {
-        if (!ok) return;
-        fetch('/api/merch/delete/' + merchId, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({user_id: userId})
-        })
-        .then(r => r.json())
-        .then(res => {
-            uiAlert(res.message);
-            if (res.success) loadMerch();
-        })
-        .catch(err => uiAlert('Ошибка: ' + err));
-    });
-}
-    function loadMyOrders() {
-        fetch(`/api/merch/my_orders?user_id=${userId}`).then(r => r.json()).then(orders => {
-            if (orders.length > 0) {
-                document.getElementById('my-merch-orders').style.display = 'block';
-                document.getElementById('my-orders-list').innerHTML = orders.map(o => {
-                    let statusHtml = '';
-                    if(o.status === 'pending') statusHtml = '<span style="color:orange">Ждет подтверждения</span>';
-                    if(o.status === 'rejected') statusHtml = '<span style="color:red">Отклонено</span>';
-                    if(o.status === 'approved') statusHtml = `<span style="color:green">Код: <b>${o.secret_code}</b></span>`;
-                    
-                    return `
+            // 3. Загрузка заявок (если Студсовет)
+            if (['admin', 'stud_council'].includes(currentUserRole)) {
+                document.getElementById('council-orders-panel').style.display = 'block';
+                loadCouncilOrders();
+            }
+        }
+        function deleteMerch(merchId) {
+            uiConfirm('Удалить этот товар?', (ok) => {
+                if (!ok) return;
+                fetch('/api/merch/delete/' + merchId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId })
+                })
+                    .then(r => r.json())
+                    .then(res => {
+                        uiAlert(res.message);
+                        if (res.success) loadMerch();
+                    })
+                    .catch(err => uiAlert('Ошибка: ' + err));
+            });
+        }
+        function loadMyOrders() {
+            fetch(`/api/merch/my_orders?user_id=${userId}`).then(r => r.json()).then(orders => {
+                if (orders.length > 0) {
+                    document.getElementById('my-merch-orders').style.display = 'block';
+                    document.getElementById('my-orders-list').innerHTML = orders.map(o => {
+                        let statusHtml = '';
+                        if (o.status === 'pending') statusHtml = '<span style="color:orange">Ждет подтверждения</span>';
+                        if (o.status === 'rejected') statusHtml = '<span style="color:red">Отклонено</span>';
+                        if (o.status === 'approved') statusHtml = `<span style="color:green">Код: <b>${o.secret_code}</b></span>`;
+
+                        return `
                     <div style="display:flex; justify-content:space-between; border-bottom:1px solid #eee; padding:8px 0;">
                         <div style="display:flex; align-items:center;">
                             <img src="${o.image_url || '/static/merch_placeholder.png'}" style="width:40px; height:40px; border-radius:4px; margin-right:10px; object-fit:cover;">
@@ -677,18 +1073,18 @@ function deleteMerch(merchId) {
                             </div>
                         </div>
                     </div>`;
-                }).join('');
-            }
-        });
-    }
+                    }).join('');
+                }
+            });
+        }
 
-    function loadCouncilOrders() {
-        fetch('/api/merch/orders/pending').then(r => r.json()).then(orders => {
-            if (orders.length === 0) {
-                document.getElementById('council-orders-list').innerHTML = '<div style="font-size:12px; color:gray; padding:10px; text-align:center;">Заявок нет</div>';
-                return;
-            }
-            document.getElementById('council-orders-list').innerHTML = orders.map(o => `
+        function loadCouncilOrders() {
+            fetch('/api/merch/orders/pending').then(r => r.json()).then(orders => {
+                if (orders.length === 0) {
+                    document.getElementById('council-orders-list').innerHTML = '<div style="font-size:12px; color:gray; padding:10px; text-align:center;">Заявок нет</div>';
+                    return;
+                }
+                document.getElementById('council-orders-list').innerHTML = orders.map(o => `
                 <div style="background:white; padding:10px; border-radius:8px; margin-bottom:8px; border:1px solid #eee;">
                     <div style="font-weight:bold; font-size:13px;">${o.merch_name}</div>
                     <div style="font-size:12px; color:gray; margin-bottom:8px;">
@@ -701,28 +1097,28 @@ function deleteMerch(merchId) {
                     </div>
                 </div>
             `).join('');
-        });
-    }
+            });
+        }
 
-    function processOrder(oid, action) {
-        if(!confirm(action === 'approve' ? 'Выдать товар?' : 'Отменить заказ?')) return;
-        
-        fetch('/api/merch/orders/approve', {
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({order_id: oid, action: action})
-        }).then(r => r.json()).then(res => {
-            uiAlert(res.message);
-            loadCouncilOrders(); // Обновить список
-        });
-    }
+        function processOrder(oid, action) {
+            if (!confirm(action === 'approve' ? 'Выдать товар?' : 'Отменить заказ?')) return;
 
-    // --- ADMIN STATS ---
+            fetch('/api/merch/orders/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_id: oid, action: action })
+            }).then(r => r.json()).then(res => {
+                uiAlert(res.message);
+                loadCouncilOrders(); // Обновить список
+            });
+        }
 
-    function loadAdminStats() {
-        fetch(`/api/admin/stats?user_id=${userId}`).then(r => r.json()).then(s => {
-            if(s.error) return document.getElementById('admin-stats').innerHTML = "Доступ запрещен";
-            document.getElementById('admin-stats').innerHTML = `
+        // --- ADMIN STATS ---
+
+        function loadAdminStats() {
+            fetch(`/api/admin/stats?user_id=${userId}`).then(r => r.json()).then(s => {
+                if (s.error) return document.getElementById('admin-stats').innerHTML = "Доступ запрещен";
+                document.getElementById('admin-stats').innerHTML = `
                 <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
                     <div>Пользователей: <b>${s.users_count}</b></div>
                     <div>Оборот: <b>${s.money_in_system}</b></div>
@@ -731,140 +1127,158 @@ function deleteMerch(merchId) {
                 <small>Последние операции:</small>
                 ${s.last_transactions.map(t => `<div style="font-size:11px; margin-top:5px;">${t.last_name}: ${t.type} ${t.amount}</div>`).join('')}
             `;
-        });
-    }
-
-    // --- ACTIONS (FORMS) ---
-
-    function createService() {
-        const name = document.getElementById('svc-name').value;
-        const price = document.getElementById('svc-price').value;
-        const desc = document.getElementById('svc-desc').value;
-        fetch('/api/add_service', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({user_id: userId, name, points_cost: price, description: desc})
-        }).then(r=>r.json()).then(res => { 
-            uiAlert(res.success ? res.message : res.message); 
-            toggleForm('create-service-card'); 
-            loadServices(); 
-        });
+            });
         }
 
-    function createActivity() {
-        fetch('/api/create_activity', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                user_id: userId, 
-                title: document.getElementById('act-title').value,
-                points: document.getElementById('act-points').value,
-                date: document.getElementById('act-date').value
-            })
-        }).then(r=>r.json()).then(res => { uiAlert(res.message); toggleForm('create-activity-card'); loadActivities(); });
-    }
+        // --- ACTIONS (FORMS) ---
 
-    function addMerch() {
-         const formData = new FormData();
-         formData.append('user_id', userId);
-         formData.append('name', document.getElementById('m-name').value);
-         formData.append('price', document.getElementById('m-price').value);
-         formData.append('stock', document.getElementById('m-stock').value);
-         formData.append('description', "Новинка");
-         
-         const fileInput = document.getElementById('m-file');
-         if (fileInput.files[0]) {
-             formData.append('image', fileInput.files[0]);
-         }
+        function createService() {
+            const name = document.getElementById('svc-name').value;
+            const price = document.getElementById('svc-price').value;
+            const desc = document.getElementById('svc-desc').value;
+            fetch('/api/add_service', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, name, points_cost: price, description: desc })
+            }).then(r => r.json()).then(res => {
+                uiAlert(res.success ? res.message : res.message);
+                toggleForm('create-service-card');
+                loadServices();
+            });
+        }
 
-         fetch('/api/add_merch_item', {
-            method: 'POST',
-            body: formData 
-         }).then(r=>r.json()).then(res => { 
-             uiAlert(res.message); 
-             toggleForm('add-merch-card'); 
-             loadMerch(); 
-         });
-    }
-    
-    function confirmTask(oid) {
-        fetch('/api/confirm_task', {
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({user_id: userId, order_id: oid})
-        })
-        .then(r => r.json())
-        .then(res => {
-            if (res.success) {
-                uiAlert(res.message);
-            } else {
-                uiAlert(res.message || 'Ошибка сервера');
+        function loadAuctionCount() {
+            fetch('/api/auctions/count')
+                .then(r => r.json())
+                .then(data => {
+                    const badge = document.getElementById('auction-badge');
+                    if (data.count > 0) {
+                        badge.innerText = data.count;
+                        badge.style.display = 'inline-block';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                });
+        }
+
+        // Вызываем при загрузке страницы
+        document.addEventListener("DOMContentLoaded", loadAuctionCount);
+
+        function createActivity() {
+            fetch('/api/create_activity', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    title: document.getElementById('act-title').value,
+                    points: document.getElementById('act-points').value,
+                    date: document.getElementById('act-date').value
+                })
+            }).then(r => r.json()).then(res => { uiAlert(res.message); toggleForm('create-activity-card'); loadActivities(); });
+        }
+
+        function addMerch() {
+            const formData = new FormData();
+            formData.append('user_id', userId);
+            formData.append('name', document.getElementById('m-name').value);
+            formData.append('price', document.getElementById('m-price').value);
+            formData.append('stock', document.getElementById('m-stock').value);
+            formData.append('description', "Новинка");
+
+            const fileInput = document.getElementById('m-file');
+            if (fileInput.files[0]) {
+                formData.append('image', fileInput.files[0]);
             }
-            loadServices();  // Обновляем список услуг
-            updateAllData(); // Обновляем баланс
-        })
-        .catch(err => {
-            uiAlert('Ошибка сети: ' + err);
-        });
-    }
 
-    
-    function buyCurrentMerch() {
-         uiConfirm(`Заказать товар?`, (ok) => {
-             if(!ok) return;
-             fetch('/api/buy_merch', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({user_id: userId, merch_id: currentMerchId})
-             }).then(r=>r.json()).then(res => { 
-                 uiAlert(res.message); 
-                 closeMerchModal(); 
-                 loadMerch(); 
-                 updateAllData(); 
-             });
-         });
-    }
+            fetch('/api/add_merch_item', {
+                method: 'POST',
+                body: formData
+            }).then(r => r.json()).then(res => {
+                uiAlert(res.message);
+                toggleForm('add-merch-card');
+                loadMerch();
+            });
+        }
 
-    function renderChart(stats) {
-      const ctx = document.getElementById('expensesChart').getContext('2d');
-      if (myChart) myChart.destroy();
-      myChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: stats.map(s => s.date),
-          datasets: [{
-            label: 'Траты',
-            data: stats.map(s => s.total),
-            borderColor: '#2481cc',
-            tension: 0.4,
-            fill: true,
-            backgroundColor: 'rgba(36, 129, 204, 0.1)'
-          }]
-        },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false } }, x: { grid: { display: false } } } }
-      });
-    }
+        function confirmTask(oid) {
+            fetch('/api/confirm_task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, order_id: oid })
+            })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.success) {
+                        uiAlert(res.message);
+                    } else {
+                        uiAlert(res.message || 'Ошибка сервера');
+                    }
+                    loadServices();  // Обновляем список услуг
+                    updateAllData(); // Обновляем баланс
+                })
+                .catch(err => {
+                    uiAlert('Ошибка сети: ' + err);
+                });
+        }
 
-    // --- UTILS ---
-    function isVersionAtLeast(ver) {
-      if (!tg || !tg.version) return false;
-      const v1 = tg.version.split('.').map(Number);
-      const v2 = ver.split('.').map(Number);
-      return (v1[0] > v2[0]) || (v1[0] === v2[0] && v1[1] >= v2[1]);
-    }
 
-    function uiAlert(msg) {
-        console.log('DEBUG uiAlert:', msg);  // Покажет в консоли что реально приходит
-        if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showAlert(msg);
-        else alert(JSON.stringify(msg));  // Покажет объект целиком
-    }
+        function buyCurrentMerch() {
+            uiConfirm(`Заказать товар?`, (ok) => {
+                if (!ok) return;
+                fetch('/api/buy_merch', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, merch_id: currentMerchId })
+                }).then(r => r.json()).then(res => {
+                    uiAlert(res.message);
+                    closeMerchModal();
+                    loadMerch();
+                    updateAllData();
+                });
+            });
+        }
 
-    
-    function uiConfirm(msg, callback) {
-      if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showConfirm(msg, callback);
-      else { const r = confirm(msg); callback(r); }
-    }
+        function renderChart(stats) {
+            const ctx = document.getElementById('expensesChart').getContext('2d');
+            if (myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: stats.map(s => s.date),
+                    datasets: [{
+                        label: 'Траты',
+                        data: stats.map(s => s.total),
+                        borderColor: '#2481cc',
+                        tension: 0.4,
+                        fill: true,
+                        backgroundColor: 'rgba(36, 129, 204, 0.1)'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false } }, x: { grid: { display: false } } } }
+            });
+        }
 
-    // START
-    init();
-  </script>
+        // --- UTILS ---
+        function isVersionAtLeast(ver) {
+            if (!tg || !tg.version) return false;
+            const v1 = tg.version.split('.').map(Number);
+            const v2 = ver.split('.').map(Number);
+            return (v1[0] > v2[0]) || (v1[0] === v2[0] && v1[1] >= v2[1]);
+        }
+
+        function uiAlert(msg) {
+            console.log('DEBUG uiAlert:', msg);  // Покажет в консоли что реально приходит
+            if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showAlert(msg);
+            else alert(JSON.stringify(msg));  // Покажет объект целиком
+        }
+
+
+        function uiConfirm(msg, callback) {
+            if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showConfirm(msg, callback);
+            else { const r = confirm(msg); callback(r); }
+        }
+
+        // START
+        init();
+    </script>
 
 </body>
+
 </html>

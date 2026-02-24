@@ -560,6 +560,293 @@ class Database:
         finally:
             conn.close()
 
+    def place_bid(self, auction_id, student_tg_id, bid_amount):
+        """Студент делает ставку на аукционе"""
+        student_uuid = self._get_student_uuid(student_tg_id)
+        if not student_uuid: return False, "Кто ты, воин? Юзер не найден."
+
+        conn = self._get_connection()
+        if not conn: return False, "БД прилегла отдохнуть."
+
+        try:
+            cur = conn.cursor(dictionary=True)
+
+            cur.execute("SELECT id, role FROM students WHERE telegram_user_id = %s", (student_tg_id,))
+            user = cur.fetchone()
+            
+            if not user: return False, "Юзер не найден."
+            
+            # БАН СТУДСОВЕТУ И АДМИНАМ
+            if user['role'] in ('stud_council', 'admin'):
+                return False, "Эй, организаторам торгов запрещено делать ставки на свои же лоты! 🛑"
+                
+            student_uuid = user['id']
+
+            # 2. Проверяем аукцион (что он открыт, время не вышло и т.д.)
+            cur.execute("SELECT * FROM auctions WHERE id = %s", (auction_id,))
+            auction = cur.fetchone()
+            
+            # 1. Достаем инфу по аукциону
+            cur.execute("SELECT * FROM auctions WHERE id = %s", (auction_id,))
+            auction = cur.fetchone()
+            
+            if not auction:
+                return False, "Аукцион испарился."
+            if auction['status'] != 'open':
+                return False, "Поезд ушёл, аукцион уже закрыт"
+                
+            # 2. Проверяем время (не истекло ли)
+            from datetime import datetime
+            if auction['end_time'] < datetime.now():
+                return False, "Время вышло! Ставки больше не принимаются."
+
+            # 3. Чекаем минимальную ставку
+            min_required_bid = auction['current_bid'] + 10 if auction['current_bid'] > 0 else auction['start_price']
+            if bid_amount < min_required_bid:
+                return False, f"Маловато будет! Минимальная ставка сейчас: {min_required_bid} STC."
+
+            # 4. 🔥 ЧЕКАЕМ БАЛАНС И ВЕЖЛИВО ШЛЁМ НАХУЙ 🔥
+            cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (student_uuid,))
+            balance = cur.fetchone()
+            
+            if not balance or balance['current_points'] < bid_amount:
+                return False, f"Сорян, бро, твои финансы поют романсы. Хочешь поставить {bid_amount} STC, а в кармане только {balance['current_points'] if balance else 0}. Иди фарми коины на тасках!"
+
+            # 5. Делаем дела: пишем ставку и апдейтим аукцион
+            import uuid
+            bid_id = str(uuid.uuid4())
+            
+            cur.execute("START TRANSACTION")
+            
+            # Записываем ставку в историю
+            cur.execute("""
+                INSERT INTO bids (id, auction_id, bidder_id, amount)
+                VALUES (%s, %s, %s, %s)
+            """, (bid_id, auction_id, student_uuid, bid_amount))
+            
+            # Обновляем текущую максимальную ставку в аукционе
+            cur.execute("""
+                UPDATE auctions SET current_bid = %s WHERE id = %s
+            """, (bid_amount, auction_id))
+            
+            conn.commit()
+            return True, "Ставка принята! Ты пока что батя этого лота 😎"
+
+        except Exception as e:
+            conn.rollback()
+            return False, f"Внутренняя ошибка: {e}"
+        finally:
+            conn.close()
+
+    def get_auction_details(self, auction_id):
+        """Отдает инфу о лоте и хистори ставок"""
+        conn = self._get_connection()
+        cur = conn.cursor(dictionary=True)
+        
+        # Достаем сам лот с картинкой и описанием из таблицы merch
+        cur.execute("""
+            SELECT a.id, a.start_price, a.current_bid, a.end_time, a.status,
+                m.name, m.description, m.image_url
+            FROM auctions a
+            JOIN merch m ON a.merch_id = m.id
+            WHERE a.id = %s
+        """, (auction_id,))
+        auction = cur.fetchone()
+        
+        if not auction: return None
+        
+        # Вытаскиваем историю ставок (кто ставил)
+        cur.execute("""
+            SELECT b.amount, b.created_at, s.first_name, s.last_name
+            FROM bids b
+            JOIN students s ON b.bidder_id = s.id
+            WHERE b.auction_id = %s
+            ORDER BY b.amount DESC
+        """, (auction_id,))
+        
+        auction['bids_history'] = cur.fetchall()
+        conn.close()
+        return auction
+    
+    def process_finished_auctions(self):
+        """Фоновый воркер: закрывает истекшие аукционы и списывает коины"""
+        conn = self._get_connection()
+        if not conn: return
+        
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Ищем все открытые аукционы, у которых время вышло
+            cur.execute("""
+                SELECT id, title, current_bid 
+                FROM auctions 
+                WHERE status = 'open' AND end_time <= NOW()
+            """)
+            finished_auctions = cur.fetchall()
+            
+            if not finished_auctions:
+                return  # Если никто не закончился, просто выходим
+                
+            import uuid
+            
+            for auction in finished_auctions:
+                auction_id = auction['id']
+                lot_title = auction['title']
+                final_price = auction['current_bid']
+                
+                # Начинаем транзакцию для каждого отдельного аукциона
+                cur.execute("START TRANSACTION")
+                
+                # 2. Ищем, кто поставил финальную (максимальную) ставку первым
+                cur.execute("""
+                    SELECT bidder_id 
+                    FROM bids 
+                    WHERE auction_id = %s AND amount = %s
+                    ORDER BY created_at ASC 
+                    LIMIT 1
+                """, (auction_id, final_price))
+                
+                winner = cur.fetchone()
+                
+                if winner:
+                    winner_id = winner['bidder_id']
+                    
+                    # 3. Чекаем баланс победителя (хватит ли ему сейчас денег)
+                    cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (winner_id,))
+                    bal = cur.fetchone()
+                    
+                    if bal and bal['current_points'] >= final_price:
+                        # Бабки есть! Списываем коины за победу в лоте
+                        cur.execute("""
+                            UPDATE balances 
+                            SET current_points = current_points - %s, total_spent = total_spent + %s 
+                            WHERE student_id = %s
+                        """, (final_price, final_price, winner_id))
+                        
+                        # Пишем красивую запись в историю транзакций
+                        tx_id = str(uuid.uuid4())
+                        cur.execute("""
+                            INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id)
+                            VALUES (%s, %s, 'spend', %s, %s, 'auction', %s)
+                        """, (tx_id, winner_id, final_price, f"Победа в аукционе: {lot_title}", auction_id))
+                        
+                        # Обновляем статус аукциона на 'completed' и записываем победителя
+                        cur.execute("""
+                            UPDATE auctions 
+                            SET status = 'completed', winner_id = %s 
+                            WHERE id = %s
+                        """, (winner_id, auction_id))
+                        
+                        print(f"[AUCTION BOT] Ура! Лот '{lot_title}' продан студенту {winner_id} за {final_price} STC.")
+                    
+                    else:
+                        # ⚠️ Студент перебил ставку, а потом потратил все коины на шавуху. 
+                        # Лочим аукцион со статусом failed.
+                        cur.execute("UPDATE auctions SET status = 'failed' WHERE id = %s", (auction_id,))
+                        print(f"[AUCTION BOT] Фейл. Лот '{lot_title}' сорвался: победитель оказался бомжом.")
+                else:
+                    # На лот не поставили вообще ни одной ставки
+                    cur.execute("UPDATE auctions SET status = 'no_bids' WHERE id = %s", (auction_id,))
+                    print(f"[AUCTION BOT] Лот '{lot_title}' закрыт: никто не сделал ставок.")
+
+                # Коммитим транзакцию конкретного аукциона
+                conn.commit()
+                
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Ошибка в планировщике аукционов: {e}")
+        finally:
+            conn.close()
+
+    def get_auction_details(self, auction_id):
+        """Достает ВСЮ инфу о лоте + историю ставок"""
+        conn = self._get_connection()
+        if not conn: return None
+        
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Забираем сам лот из обновленной таблицы auctions
+            cur.execute("""
+                SELECT id, title, description, image_url, start_price, current_bid, end_time, status, winner_id
+                FROM auctions 
+                WHERE id = %s
+            """, (auction_id,))
+            auction = cur.fetchone()
+            
+            if not auction: return None
+            
+            # Конвертируем дату в строку для шаблонизатора (Jinja)
+            if auction['end_time']:
+                auction['end_time_str'] = auction['end_time'].strftime('%d.%m.%Y %H:%M')
+                
+            # Определяем минимальную ставку для инпута
+            auction['min_bid'] = auction['current_bid'] + 10 if auction['current_bid'] > 0 else auction['start_price']
+
+            # 2. 🔥 ДОСТАЁМ ИСТОРИЮ СТАВОК 🔥 (от самых свежих к старым)
+            cur.execute("""
+                SELECT b.amount, b.created_at, s.first_name, s.last_name
+                FROM bids b
+                JOIN students s ON b.bidder_id = s.id
+                WHERE b.auction_id = %s
+                ORDER BY b.amount DESC
+            """, (auction_id,))
+            
+            bids = cur.fetchall()
+            for b in bids:
+                b['time_str'] = b['created_at'].strftime('%H:%M:%S') if b['created_at'] else ''
+                
+            auction['bids_history'] = bids
+            
+            return auction
+        finally:
+            conn.close()
+
+    def create_standalone_auction(self, tg_user_id, title, description, image_url, start_price, end_time_str):
+        """Студсовет выставляет уникальный лот напрямую в аукционы (без merch)"""
+        conn = self._get_connection()
+        if not conn: return False, "БД прилегла."
+
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Проверяем роль (доступ только студсовету/админам)
+            cur.execute("SELECT id, role FROM students WHERE telegram_user_id = %s", (tg_user_id,))
+            user = cur.fetchone()
+
+            if not user or user['role'] not in ('stud_council', 'admin'):
+                return False, "Недостаточно прав! Только Студсовет выставляет лоты."
+
+            # 2. Валидация времени (не больше недели)
+            from datetime import datetime, timedelta
+            end_time_dt = datetime.strptime(end_time_str, '%Y-%m-%dT%H:%M')
+            max_end_time = datetime.now() + timedelta(days=7)
+            
+            if end_time_dt > max_end_time:
+                return False, "Время аукциона не может превышать 1 неделю! 📅"
+            if end_time_dt <= datetime.now():
+                return False, "Аукцион в прошлом? Выбери нормальную дату."
+
+            # 3. Пишем лот напрямую в таблицу auctions!
+            import uuid
+            auction_id = str(uuid.uuid4())
+            
+            cur.execute("""
+                INSERT INTO auctions (id, student_id, title, description, image_url, start_price, end_time, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'open')
+            """, (auction_id, user['id'], title, description, image_url, start_price, end_time_str))
+            
+            conn.commit()
+            return True, f"Лот «{title}» успешно выставлен на аукцион!"
+
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Ошибка при создании аукциона: {e}")
+            return False, "Внутренняя ошибка сервера."
+        finally:
+            conn.close()
+
+
     def get_student_by_tg_id(self, telegram_id):
         # ОБНОВЛЕННЫЙ МЕТОД: теперь возвращает role
         conn = self._get_connection()

@@ -191,7 +191,7 @@ class Database:
         if not conn: return []
         try:
             cur = conn.cursor(dictionary=True)
-            cur.execute("SELECT * FROM merch WHERE stock > 0 ORDER BY price_points ASC")
+            cur.execute("SELECT * FROM merch ORDER BY price_points ASC")
             return cur.fetchall()
         finally:
             conn.close()
@@ -285,44 +285,41 @@ class Database:
         try:
             cur = conn.cursor(dictionary=True)
             
-            # 🔥 Логика: мои закрытые услуги + общие активные
+            # 🔥 Фикс SQL: Ищем заказы ТОЛЬКО текущего юзера, чтобы не ломать статусы другим
             query = """
             SELECT 
                 s.id, s.name, s.description, s.points_cost, s.provider_id,
-                s.max_orders, s.orders_completed, s.active,
+                s.max_orders, s.orders_completed, s.active, s.status as base_status,
                 st.first_name as provider_name,
-                ord.id as order_id, ord.buyer_id as executor_id, ord.status as order_status
+                my_ord.id as my_order_id, my_ord.status as my_order_status
             FROM services s
             JOIN students st ON s.provider_id = st.id
-            LEFT JOIN service_orders ord ON s.id = ord.service_id 
-                AND ord.status IN ('pending', 'in_progress')
+            -- Джоиним только МОЙ заказ по этой услуге
+            LEFT JOIN service_orders my_ord 
+                ON s.id = my_ord.service_id 
+                AND my_ord.buyer_id = %s 
+                AND my_ord.status IN ('pending', 'in_progress')
             WHERE 
-                -- Общие активные услуги
-                (s.active = 1) 
-                OR 
-                -- Мои закрытые услуги
-                (s.provider_id = %s)
+                (s.active = 1) OR (s.provider_id = %s)
             ORDER BY s.created_at DESC
             """
-            cur.execute(query, (user_uuid,))
+            # Передаем user_uuid два раза (для my_ord и для WHERE)
+            cur.execute(query, (user_uuid, user_uuid))
             rows = cur.fetchall()
             
             result = []
             for row in rows:
-                status = 'open'  # По умолчанию
+                status = row['base_status'] or 'open'
                 
-                # 🔥 ЛОГИКА СТАТУСОВ:
-                if row['order_status'] == 'in_progress':
-                    status = 'in_progress'  # Только реально активный заказ
-                elif row['order_status'] == 'pending':
-                    status = 'pending'
+                # Если Я взял этот заказ, перекрываем статус моим статусом
+                if row['my_order_status']:
+                    status = row['my_order_status']
 
-                # Вычисляем оставшиеся заказы
-                remaining_orders = "Неограниченно"
+                # 🔥 Фикс типизации: всегда отдаём ЧИСЛО (Int). -1 означает безлимит.
+                remaining_orders = -1 
                 if row['max_orders'] is not None:
-                    remaining_orders = row['max_orders'] - row['orders_completed']
-                    if remaining_orders <= 0:
-                        remaining_orders = "Закончилось"
+                    # Защита от отрицательных значений
+                    remaining_orders = max(0, row['max_orders'] - row['orders_completed'])
 
                 service_info = {
                     'id': row['id'],
@@ -331,18 +328,78 @@ class Database:
                     'points_cost': row['points_cost'],
                     'provider_name': row['provider_name'],
                     'is_my_task': (str(row['provider_id']) == str(user_uuid)),
-                    'am_i_executor': (str(row['executor_id']) == str(user_uuid)) if row['executor_id'] else False,
+                    'am_i_executor': bool(row['my_order_id']), # Если есть мой заказ — я исполнитель
                     'status': status,
-                    'order_id': row['order_id'],
-                    'remaining_orders': remaining_orders,
+                    'order_id': row['my_order_id'],
+                    'remaining_orders': remaining_orders, # Чистый Int! Фронт сам пишет "Неограниченно" если -1
                     'max_orders': row['max_orders'],
-                    'orders_completed': row['orders_completed']
+                    'orders_completed': row['orders_completed'],
+                    'is_active': bool(row['active']) # Добавили потеряшку
                 }
                 result.append(service_info)
                 
             return result
         finally:
             conn.close()
+
+    def take_service_order(self, service_id, executor_tg_id):
+        """Исполнитель берет задачу в работу (статус: in_progress)"""
+        executor_uuid = self._get_student_uuid(executor_tg_id)
+        if not executor_uuid: return False, "Исполнитель не найден"
+
+        conn = self._get_connection()
+        if not conn: return False, "Ошибка БД"
+
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Проверяем услугу (существует ли и активна ли)
+            cur.execute("SELECT * FROM services WHERE id = %s AND active = 1", (service_id,))
+            service = cur.fetchone()
+            
+            if not service: 
+                return False, "Услуга не найдена или уже неактивна"
+                
+            if str(service['provider_id']) == str(executor_uuid):
+                return False, "Бро, нельзя взять свою же таску!"
+
+            # 2. Проверяем лимиты заказов (если max_orders задан)
+            if service['max_orders'] is not None:
+                if service['orders_completed'] >= service['max_orders']:
+                    return False, "Упс, лимит заказов на эту услугу исчерпан"
+
+            # 3. Проверяем, не взял ли этот чел её УЖЕ в работу
+            cur.execute("""
+                SELECT id FROM service_orders 
+                WHERE service_id = %s AND buyer_id = %s AND status IN ('pending', 'in_progress')
+            """, (service_id, executor_uuid))
+            
+            if cur.fetchone():
+                return False, "Ты уже взял эту задачу, иди делай!"
+
+            # 4. СОЗДАЁМ ЗАКАЗ СО СТАТУСОМ in_progress
+            import uuid
+            order_id = str(uuid.uuid4())
+            
+            # Начинаем транзакцию
+            cur.execute("START TRANSACTION")
+            
+            cur.execute("""
+                INSERT INTO service_orders (id, service_id, buyer_id, status)
+                VALUES (%s, %s, %s, 'in_progress')
+            """, (order_id, service_id, executor_uuid))
+            
+            conn.commit()
+            return True, "Задача взята в работу! Жди, пока заказчик примет."
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Ошибка взятия задачи: {e}")
+            return False, "Внутренняя ошибка сервера"
+        finally:
+            conn.close()
+
+
     def complete_service_order(self, order_id, customer_tg_id):
         """Подтверждение с ПОЛНЫМ commit всех изменений"""
         if not order_id: return False, "Не передан ID заказа"
@@ -391,7 +448,7 @@ class Database:
 
             print(f"[DEBUG] Баланс клиента ДО: {customer_bal['current_points']}, Исполнителя ДО: {executor_bal['current_points']}")
 
-            # 🔥 4. НАЧИНАЕМ ТРАНЗАКЦИЮ (явная)
+            # НАЧИНАЕМ ТРАНЗАКЦИЮ (явная)
             cur.execute("START TRANSACTION")
             
             # Обновляем статус заказа
@@ -432,6 +489,7 @@ class Database:
             return False, f"Ошибка: {str(e)}"
         finally:
             conn.close()
+
     def assign_service(self, service_id, executor_tg_id):
         executor_uuid = self._get_student_uuid(executor_tg_id)
         if not executor_uuid: return False, "Пользователь не найден"

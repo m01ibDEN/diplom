@@ -184,6 +184,24 @@ def api_services():
         return jsonify(db.get_all_services(int(user_id)))
     except Exception as e:
         return jsonify([]), 500
+    
+@app.route('/api/services/take', methods=['POST'])
+def api_take_service():
+    data = request.get_json()
+    service_id = data.get('service_id')
+    user_id = data.get('user_id') # Это твой telegram_user_id из фронта
+    
+    if not service_id or not user_id:
+        return jsonify({'success': False, 'message': 'Нет данных'}), 400
+        
+    # Вызываем тот самый метод, который я написал тебе в прошлом ответе
+    # Предполагаем, что класс с БД называется db (или как он у тебя называется)
+    success, message = db.take_service_order(service_id, user_id)
+    
+    if success:
+        return jsonify({'success': True, 'message': message}), 200
+    else:
+        return jsonify({'success': False, 'message': message}), 400
 
 @app.route('/api/buy_service', methods=['POST'])
 def api_buy_service():

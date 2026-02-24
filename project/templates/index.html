@@ -494,40 +494,81 @@
             `).join('');
         });
     }
+    
     function loadServices() {
-        fetch(`/api/services?user_id=${userId}`).then(r => r.json()).then(data => {
-            document.getElementById('services-list').innerHTML = data.map(s => {
-                // Статус лейбл
-                let statusLabel = '🔍 Поиск исполнителя';
-                if (s.active === 0) statusLabel = '✅ Завершено';
-                else if (s.status === 'in_progress') statusLabel = '🔨 В работе';
+        fetch(`/api/services?user_id=${userId}`)
+            .then(r => r.json())
+            .then(data => {
+                // Включаем логи для QA! Посмотри в консоль браузера
+                console.log("Данные с бэка:", data);
 
-                // Кнопки
-                let actionBtn = '';
-                if (s.active === 1 && s.status === 'open' && !s.is_my_task) {
-                    actionBtn = `<button class="btn" style="padding:6px; font-size:12px;" onclick="takeTask('${s.id}')">Взять</button>`;
-                }
-                if (s.is_my_task && s.status === 'in_progress') {
-                    actionBtn = `<button class="btn" style="padding:6px; font-size:12px; background:#4caf50;" onclick="confirmTask('${s.order_id}')">Принять работу</button>`;
-                }
+                document.getElementById('services-list').innerHTML = data.map(s => {
+                    
+                    // 🔥 ТЕРМИНАТОР-ФИКС ДЛЯ ACTIVE 🔥
+                    // Если там 1, '1', true или 'true' — всё сожрёт.
+                    const isActive = (s.active == 1 || s.active === true || s.active === '1' || s.is_active === true);
+                    
+                    // Статус лейбл
+                    let statusLabel = 'Поиск исполнителя';
+                    if (!isActive) {
+                        statusLabel = 'Завершено';
+                    } else if (s.status === 'in_progress' || s.status === 'pending') {
+                        statusLabel = '🔨 В работе';
+                    }
 
-                return `
-                    <div class="service-item" style="${s.active === 0 ? 'opacity:0.6;' : ''}">
-                        <div style="display:flex; justify-content:space-between;">
-                            <div>
-                                <div style="font-weight:bold;">${s.name}</div>
-                                <div style="font-size:12px; color:var(--tg-hint);">${s.description || ''}</div>
-                                <div style="font-size:11px; margin-top:4px;">${statusLabel}</div>
-                            </div>
-                            <div style="text-align:right;">
-                                <div style="color:var(--tg-link); font-weight:bold;">${s.points_cost} STC</div>
-                                ${actionBtn}
+                    // Кнопки
+                    let actionBtn = '';
+                    
+                    // Условие появления кнопки "Взять"
+                    if (isActive && !s.is_my_task && (s.status === 'open' || !s.status)) {
+                        actionBtn = `<button class="btn" style="padding:6px; font-size:12px;" onclick="takeTask('${s.id}')">Взять</button>`;
+                    }
+                    
+                    // Кнопка для заказчика
+                    if (s.is_my_task && (s.status === 'in_progress' || s.status === 'pending')) {
+                        actionBtn = `<button class="btn" style="padding:6px; font-size:12px; background:#4caf50;" onclick="confirmTask('${s.order_id}')">Принять работу</button>`;
+                    }
+
+                    return `
+                        <div class="service-item" style="${!isActive ? 'opacity:0.6;' : ''}">
+                            <div style="display:flex; justify-content:space-between;">
+                                <div>
+                                    <div style="font-weight:bold;">${s.name}</div>
+                                    <div style="font-size:12px; color:var(--tg-hint);">${s.description || ''}</div>
+                                    <div style="font-size:11px; margin-top:4px;">${statusLabel}</div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="color:var(--tg-link); font-weight:bold;">${s.points_cost} STC</div>
+                                    ${actionBtn}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                `;
-            }).join('');
-        });
+                    `;
+                }).join('');
+            });
+    }
+
+    function takeTask(serviceId) {
+        if (!confirm("Уверен, что хочешь взять эту задачу?")) return;
+
+        fetch('/api/services/take', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                service_id: serviceId, 
+                user_id: userId // userId у тебя уже есть глобально, раз он юзается в loadServices
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert("Задача успешно взята в работу!");
+                loadServices(); // Перезагружаем список, чтобы кнопка пропала и появился статус
+            } else {
+                alert("Ошибка: " + data.message);
+            }
+        })
+        .catch(err => console.error("Ошибка сети:", err));
     }
 
     function loadActivities() {
@@ -695,17 +736,6 @@
              toggleForm('add-merch-card'); 
              loadMerch(); 
          });
-    }
-
-    function takeTask(id) {
-         fetch('/api/take_task', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({user_id: userId, service_id: id})
-        }).then(r=>r.json()).then(res => { 
-            uiAlert(res.success ? res.message : res.message); 
-            loadServices(); 
-        });
-
     }
     
     function confirmTask(oid) {

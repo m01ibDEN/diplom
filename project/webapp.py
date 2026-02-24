@@ -166,6 +166,25 @@ def api_add_merch_item():
     except Exception as e:
         print(e)
         return jsonify({"success": False, "message": str(e)}), 500
+@app.route('/api/merch/delete/<merch_id>', methods=['POST'])
+def api_delete_merch(merch_id):
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"success": False, "message": "No JSON data"}), 400
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"success": False, "message": "No user_id"}), 400
+        
+        # Проверка прав
+        user = db.get_student_by_tg_id(user_id)
+        if not user or user['role'] not in ['admin', 'stud_council']:
+            return jsonify({"success": False, "message": "Нет прав"}), 403
+        
+        success, msg = db.delete_merch(merch_id)
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/merch')
 def api_merch():

@@ -26,7 +26,28 @@
       padding-top: 10px;
       overscroll-behavior-y: none;
     }
-
+    .delete-merch-btn {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        background: rgba(0,0,0,0.6);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        font-size: 16px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        transition: background 0.2s;
+    }
+    .delete-merch-btn:hover {
+        background: #f44336;
+    }
     /* --- НАВИГАЦИЯ --- */
     .tabs { 
       display: flex; 
@@ -592,10 +613,14 @@
     // --- MERCH LOGIC (UPDATED) ---
 
     function loadMerch() {
-        // 1. Загрузка товаров
-        fetch('/api/merch').then(r => r.json()).then(data => {
-            document.getElementById('merch-grid').innerHTML = data.map(m => `
-                <div class="merch-item" onclick="openMerchModal('${m.id}', '${m.name}', ${m.price_points}, '${m.image_url || ''}')"> 
+    // 1. Загрузка товаров
+    fetch('/api/merch').then(r => r.json()).then(data => {
+        const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
+        document.getElementById('merch-grid').innerHTML = data.map(m => {
+            const deleteButton = isStaff ? `<button class="delete-merch-btn" onclick="event.stopPropagation(); deleteMerch('${m.id}')">×</button>` : '';
+            return `
+                <div class="merch-item" style="position: relative;" onclick="openMerchModal('${m.id}', '${m.name}', ${m.price_points}, '${m.image_url || ''}')"> 
+                    ${deleteButton}
                     <img src="${m.image_url || '/static/merch_placeholder.png'}" class="merch-img" onerror="this.src='https://via.placeholder.com/150'">
                     <div class="merch-info">
                         <div class="merch-name">${m.name}</div>
@@ -603,19 +628,35 @@
                         <div class="merch-stock">В наличии: ${m.stock} шт.</div>
                     </div>
                 </div>
-            `).join('');
-        });
+            `;
+        }).join('');
+    });
 
-        // 2. Загрузка моих покупок
-        loadMyOrders();
+    // 2. Загрузка моих покупок
+    loadMyOrders();
 
-        // 3. Загрузка заявок (если Студсовет)
-        if (['admin', 'stud_council'].includes(currentUserRole)) {
-            document.getElementById('council-orders-panel').style.display = 'block';
-            loadCouncilOrders();
-        }
+    // 3. Загрузка заявок (если Студсовет)
+    if (['admin', 'stud_council'].includes(currentUserRole)) {
+        document.getElementById('council-orders-panel').style.display = 'block';
+        loadCouncilOrders();
     }
-
+}
+function deleteMerch(merchId) {
+    uiConfirm('Удалить этот товар?', (ok) => {
+        if (!ok) return;
+        fetch('/api/merch/delete/' + merchId, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: userId})
+        })
+        .then(r => r.json())
+        .then(res => {
+            uiAlert(res.message);
+            if (res.success) loadMerch();
+        })
+        .catch(err => uiAlert('Ошибка: ' + err));
+    });
+}
     function loadMyOrders() {
         fetch(`/api/merch/my_orders?user_id=${userId}`).then(r => r.json()).then(orders => {
             if (orders.length > 0) {

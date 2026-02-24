@@ -124,6 +124,22 @@ def auctions_page():
         
     return render_template('auctions.html', user_id=user_id, role=role)
 
+@app.route('/api/auctions/delete', methods=['POST'])
+def api_delete_auction():
+    data = request.get_json()
+    
+    tg_user_id = data.get('user_id')
+    auction_id = data.get('auction_id')
+    
+    if not tg_user_id or not auction_id:
+        return jsonify({'success': False, 'message': 'Нет ID юзера или лота'}), 400
+        
+    success, message = db.delete_auction(tg_user_id, auction_id)
+    
+    if success:
+        return jsonify({'success': True, 'message': message}), 200
+    else:
+        return jsonify({'success': False, 'message': message}), 400
 
 @app.route('/api/auctions', methods=['GET'])
 def api_get_auctions_list():
@@ -366,6 +382,23 @@ def api_delete_merch(merch_id):
         return jsonify({"success": success, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+    
+@app.route('/api/staff/redeem', methods=['POST'])
+def api_redeem_code():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    code = data.get('code')
+    
+    if not user_id or not code:
+        return jsonify({'success': False, 'message': 'Пустой код!'}), 400
+        
+    success, message = db.redeem_secret_code(user_id, code)
+    
+    if success:
+        return jsonify({'success': True, 'message': message}), 200
+    else:
+        return jsonify({'success': False, 'message': message}), 400
+
 
 @app.route('/api/merch')
 def api_merch():
@@ -516,7 +549,6 @@ def api_activities():
     return jsonify(db.get_active_activities())
 
 from apscheduler.schedulers.background import BackgroundScheduler
-# Предположим, твой класс с БД импортирован как db (db = Database())
 
 def run_auction_bot():
     """Обёртка для вызова метода БД"""

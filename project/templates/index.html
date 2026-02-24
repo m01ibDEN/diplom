@@ -537,9 +537,22 @@
 
         <!-- ПАНЕЛЬ СТУДСОВЕТА: ЗАЯВКИ -->
         <div id="council-orders-panel" class="role-protected card" style="display:none; border: 2px solid #ff9800;">
+
+            <!-- 🔥 НОВЫЙ БЛОК: ВЫДАЧА ЛУТА 🔥 -->
+            <div style="margin-bottom: 15px; padding: 12px; background: #fff3e0; border-radius: 8px;">
+                <h4 style="margin-bottom: 8px;">Выдача лута по коду</h4>
+                <div style="display: flex; gap: 8px;">
+                    <input id="redeem-code-input" class="input" style="margin: 0; flex: 1; text-transform: uppercase;"
+                        placeholder="Код (напр. X7B9Q2)">
+                    <button class="btn" style="width: auto; margin: 0; background: #ff9800;"
+                        onclick="redeemSecretCode()">Выдать</button>
+                </div>
+            </div>
+
             <h4>Заявки на мерч</h4>
             <div id="council-orders-list" style="margin-top:10px;">Загрузка...</div>
         </div>
+
 
         <!-- МОИ ЗАКАЗЫ (Для всех) -->
         <div id="my-merch-orders" class="card" style="display:none; border: 2px solid #4caf50;">
@@ -685,6 +698,28 @@
                 }
             }
         }
+
+        function deleteAuction(auctionId) {
+            uiConfirm("Точно удалить этот лот?", (ok) => {
+                if (!ok) return;
+
+                fetch('/api/auctions/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, auction_id: auctionId })
+                })
+                    .then(r => r.json())
+                    .then(res => {
+                        uiAlert(res.message);
+                        if (res.success) {
+                            loadAuctions(); // Обновляем список лотов (карточка исчезнет)
+                            loadAuctionCount(); // Обновляем бейджик счетчика
+                        }
+                    })
+                    .catch(err => uiAlert("Ошибка: " + err));
+            });
+        }
+
 
         // --- NAVIGATION ---
         function showTab(id, el) {
@@ -937,27 +972,49 @@
         setTimeout(loadAuctionCount, 500);
         setInterval(loadAuctionCount, 30000);
 
-        // Подгрузка списка лотов
         function loadAuctions() {
+            // Показываем прелоадер
             document.getElementById('auctions-list').innerHTML = '<div style="text-align:center; color:gray;">Грузим...</div>';
 
             fetch('/api/auctions').then(r => r.json()).then(data => {
                 const list = document.getElementById('auctions-list');
 
+                // Если список пустой - показываем заглушку
                 if (data.length === 0) {
-                    list.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--tg-hint);">
+                    list.innerHTML = `
+                <div style="text-align:center; padding: 20px; color:var(--tg-hint);">
                     <span style="font-size:30px;">🕸️</span><br>Пока лотов нет. Жди подгона от Студсовета!
                 </div>`;
                     return;
                 }
 
+                // Узнаем роль пользователя прямо перед рендером
+                const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
+
+                // Рендерим карточки
                 list.innerHTML = data.map(auc => {
+                    // Если ставок еще не было, показываем стартовую цену
                     const currentPrice = auc.current_bid > 0 ? auc.current_bid : auc.start_price;
                     const img = auc.image_url || 'https://via.placeholder.com/300x150?text=Аукцион';
 
+                    // 🔥 ФИШКА ДЛЯ СТУДСОВЕТА: Крестик удаления
+                    // Появится ТОЛЬКО у админов/студсовета и ТОЛЬКО если на лот еще не поставили ставок (current_bid == 0)
+                    let deleteBtn = '';
+                    if (isStaff && auc.current_bid === 0) {
+                        deleteBtn = `
+                        <button class="delete-merch-btn" 
+                                style="position: absolute; top: 10px; right: 10px; z-index: 10; width: 30px; height: 30px; font-size: 18px;" 
+                                onclick="event.stopPropagation(); deleteAuction('${auc.id}')">×</button>
+                    `;
+                    }
+
                     return `
-                <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 15px; border: 1px solid rgba(255, 152, 0, 0.3);">
+                <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 15px; border: 1px solid rgba(255, 152, 0, 0.3); position: relative;">
+                    
+                    ${deleteBtn} <!-- Вставляем крестик поверх картинки -->
+
                     <img src="${img}" style="width: 100%; height: 120px; object-fit: cover; display: block; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                    
                     <div style="padding: 12px;">
                         <div style="font-weight: 600; font-size: 15px; margin-bottom: 4px;">${auc.title}</div>
                         <div style="font-size: 12px; color: var(--tg-hint); margin-bottom: 12px;">${auc.description}</div>
@@ -965,15 +1022,19 @@
                         <div style="display: flex; justify-content: space-between; align-items: flex-end;">
                             <div>
                                 <div style="font-size: 16px; color: #ff9800; font-weight: bold;">${currentPrice} STC</div>
-                                <div style="font-size: 11px; color: #e91e63;">⏰ ${auc.end_time}</div>
+                                <div style="font-size: 11px; color: #e91e63;">${auc.end_time}</div>
                             </div>
                             <button class="btn" style="width: auto; padding: 6px 12px; font-size: 12px; background: #ff9800; border-radius: 8px;" onclick="window.location.href='/auction_detail?id=${auc.id}&user_id=${userId}'">
-                                Ставка ➡️
+                                Ставка
                             </button>
                         </div>
                     </div>
                 </div>`;
                 }).join('');
+
+            }).catch(err => {
+                document.getElementById('auctions-list').innerHTML = `<div style="text-align:center; color:red;">Ошибка загрузки 😢</div>`;
+                console.error(err);
             });
         }
 
@@ -1037,6 +1098,24 @@
                 loadCouncilOrders();
             }
         }
+
+        function redeemSecretCode() {
+            const codeInput = document.getElementById('redeem-code-input').value;
+            if (!codeInput) return uiAlert("Введи код!");
+
+            fetch('/api/staff/redeem', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, code: codeInput })
+            }).then(r => r.json()).then(res => {
+                uiAlert(res.message);
+                if (res.success) {
+                    document.getElementById('redeem-code-input').value = ''; // Очищаем инпут
+                    loadMerch(); // Перезагружаем списки
+                }
+            });
+        }
+
         function deleteMerch(merchId) {
             uiConfirm('Удалить этот товар?', (ok) => {
                 if (!ok) return;

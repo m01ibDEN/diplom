@@ -730,14 +730,17 @@ class Database:
                             VALUES (%s, %s, 'spend', %s, %s, 'auction', %s)
                         """, (tx_id, winner_id, final_price, f"Победа в аукционе: {lot_title}", auction_id))
                         
-                        # Обновляем статус аукциона на 'completed' и записываем победителя
+                        import string
+                        import random
+                        secret_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+                        
                         cur.execute("""
                             UPDATE auctions 
-                            SET status = 'completed', winner_id = %s 
+                            SET status = 'completed', winner_id = %s, secret_code = %s
                             WHERE id = %s
-                        """, (winner_id, auction_id))
+                        """, (winner_id, secret_code, auction_id))
                         
-                        print(f"[AUCTION BOT] Ура! Лот '{lot_title}' продан студенту {winner_id} за {final_price} STC.")
+                        print(f"[AUCTION BOT] Ура! Лот '{lot_title}' продан. Код победителя: {secret_code}")
                     
                     else:
                         # ⚠️ Студент перебил ставку, а потом потратил все коины на шавуху. 
@@ -751,12 +754,56 @@ class Database:
 
                 # Коммитим транзакцию конкретного аукциона
                 conn.commit()
+        
                 
         except Exception as e:
             conn.rollback()
             print(f"[ERROR] Ошибка в планировщике аукционов: {e}")
         finally:
             conn.close()
+
+    def delete_auction(self, tg_user_id, auction_id):
+        """Студсовет удаляет ошибочный лот (если на него еще нет ставок)"""
+        conn = self._get_connection()
+        if not conn: return False, "БД прилегла."
+
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Защита от хакеров: проверяем роль
+            cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (tg_user_id,))
+            user = cur.fetchone()
+            
+            if not user or user['role'] not in ('stud_council', 'admin'):
+                return False, "Удалять лоты могут только модераторы! 🛑"
+
+            # 2. Ищем аукцион и чекаем его статус и ставки
+            cur.execute("SELECT current_bid, status FROM auctions WHERE id = %s", (auction_id,))
+            auction = cur.fetchone()
+            
+            if not auction:
+                return False, "Такого аукциона не существует."
+                
+            if auction['status'] != 'open':
+                return False, "Аукцион уже завершен или отменен. Удалить нельзя."
+                
+            # 3. 🔥 ЗАЩИТА СТАВОК 🔥
+            if auction['current_bid'] > 0:
+                return False, "Слишком поздно! На этот лот уже пошли ставки. Удаление запрещено 💸"
+
+            # 4. Сносим лот из базы (поскольку ставок нет, ничьи деньги не пострадают)
+            cur.execute("DELETE FROM auctions WHERE id = %s", (auction_id,))
+            conn.commit()
+            
+            return True, "Лот успешно снят с торгов 🗑️"
+
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Ошибка при удалении аукциона: {e}")
+            return False, "Внутренняя ошибка сервера."
+        finally:
+            conn.close()
+
 
     def get_auction_details(self, auction_id):
         """Достает ВСЮ инфу о лоте + историю ставок"""
@@ -940,6 +987,64 @@ class Database:
             return False, str(e)
         finally:
             conn.close()
+
+    def redeem_secret_code(self, staff_tg_id, secret_code):
+        """Студсовет гасит код и выдает товар студенту"""
+        conn = self._get_connection()
+        if not conn: return False, "БД лежит отдыхает."
+
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Проверяем, что чел из Студсовета
+            cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (staff_tg_id,))
+            staff = cur.fetchone()
+            if not staff or staff['role'] not in ('stud_council', 'admin'):
+                return False, "Куда лезешь? Выдавать лут может только Студсовет! 🛑"
+
+            secret_code = secret_code.strip().upper() # Защита от кривого ввода пробелов и регистра
+
+            # 2. ИЩЕМ В ОБЫЧНОМ МЕРЧЕ (статус 'approved')
+            cur.execute("""
+                SELECT mo.id, m.name, s.first_name, s.last_name 
+                FROM merch_orders mo 
+                JOIN merch m ON mo.merch_id = m.id 
+                JOIN students s ON mo.buyer_id = s.id 
+                WHERE mo.secret_code = %s AND mo.status = 'approved'
+            """, (secret_code,))
+            merch = cur.fetchone()
+
+            if merch:
+                # Нашли! Гасим заказ.
+                cur.execute("UPDATE merch_orders SET status = 'delivered' WHERE id = %s", (merch['id'],))
+                conn.commit()
+                return True, f"Выдано: {merch['name']}\nСтудент: {merch['first_name']} {merch['last_name']}"
+
+            # 3. ИЩЕМ В АУКЦИОНАХ (статус 'completed')
+            cur.execute("""
+                SELECT a.id, a.title, s.first_name, s.last_name 
+                FROM auctions a 
+                JOIN students s ON a.winner_id = s.id 
+                WHERE a.secret_code = %s AND a.status = 'completed'
+            """, (secret_code,))
+            auc = cur.fetchone()
+
+            if auc:
+                # Нашли! Гасим аукцион.
+                cur.execute("UPDATE auctions SET status = 'delivered' WHERE id = %s", (auc['id'],))
+                conn.commit()
+                return True, f"Выдан лот: {auc['title']}\nПобедитель: {auc['first_name']} {auc['last_name']}"
+
+            # Если ничего не нашли
+            return False, "Код не найден или уже использован! Гони мошенника ссаными тряпками."
+
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Ошибка гашения кода: {e}")
+            return False, "Внутренняя ошибка сервера"
+        finally:
+            conn.close()
+
     def delete_merch(self, merch_id):
 
         conn = self._get_connection()
@@ -1040,20 +1145,53 @@ class Database:
             conn.close()
 
     def get_student_merch_orders(self, tg_id):
+        """Отдает список покупок мерча И выигранных аукционов"""
         conn = self._get_connection()
+        if not conn: return []
+        
         try:
             cur = conn.cursor(dictionary=True)
+            
+            # Получаем uuid юзера по его tg_id
+            cur.execute("SELECT id FROM students WHERE telegram_user_id = %s", (tg_id,))
+            user = cur.fetchone()
+            if not user: return []
+            student_uuid = user['id']
+
+            # 1. Достаем обычные заказы из магазина
+            # Обрати внимание, добавил mo.created_at, чтобы потом отсортировать общий список
             cur.execute("""
-                SELECT mo.id, m.name, mo.status, mo.secret_code, m.image_url
+                SELECT mo.id, m.name, mo.status, mo.secret_code, m.image_url, mo.created_at
                 FROM merch_orders mo
                 JOIN merch m ON mo.merch_id = m.id
-                JOIN students s ON mo.buyer_id = s.id
-                WHERE s.telegram_user_id = %s
+                WHERE mo.buyer_id = %s
                 ORDER BY mo.created_at DESC
-            """, (tg_id,))
-            return cur.fetchall()
+            """, (student_uuid,))
+            merch_orders = cur.fetchall()
+
+            # 2. 🔥 ДОСТАЕМ ВЫИГРАННЫЕ АУКЦИОНЫ 🔥
+            # Притворяемся, что аукцион - это обычный мерч со статусом 'approved'
+            cur.execute("""
+                SELECT id, title as name, 'approved' as status, secret_code, image_url, end_time as created_at
+                FROM auctions
+                WHERE winner_id = %s AND status = 'completed'
+                ORDER BY end_time DESC
+            """, (student_uuid,))
+            won_auctions = cur.fetchall()
+
+            # 3. Склеиваем два списка в один
+            all_purchases = merch_orders + won_auctions
+            
+            # Сортируем общий список по дате (самые свежие покупки сверху)
+            all_purchases.sort(key=lambda x: x['created_at'], reverse=True)
+
+            return all_purchases
+        except Exception as e:
+            print(f"[ERROR] Ошибка получения покупок: {e}")
+            return []
         finally:
             conn.close()
+
 
     def get_pending_merch_orders(self):
         conn = self._get_connection()

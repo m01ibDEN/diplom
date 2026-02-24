@@ -275,7 +275,6 @@ class Database:
             return False, str(e)
         finally:
             conn.close()
-
     def get_all_services(self, current_user_tg_id):
         user_uuid = self._get_student_uuid(current_user_tg_id)
         if not user_uuid: return []
@@ -285,40 +284,59 @@ class Database:
         try:
             cur = conn.cursor(dictionary=True)
             
-            # 🔥 Фикс SQL: Ищем заказы ТОЛЬКО текущего юзера, чтобы не ломать статусы другим
+            # 🔥 ФИКС SQL: Добавили provider_ord для Заказчика!
             query = """
             SELECT 
                 s.id, s.name, s.description, s.points_cost, s.provider_id,
                 s.max_orders, s.orders_completed, s.active, s.status as base_status,
                 st.first_name as provider_name,
-                my_ord.id as my_order_id, my_ord.status as my_order_status
+                my_ord.id as my_order_id, my_ord.status as my_order_status,
+                provider_ord.id as provider_order_id, provider_ord.status as provider_order_status
             FROM services s
             JOIN students st ON s.provider_id = st.id
-            -- Джоиним только МОЙ заказ по этой услуге
+            
+            -- 1. Джоиним МОЙ заказ (если я Исполнитель)
             LEFT JOIN service_orders my_ord 
                 ON s.id = my_ord.service_id 
                 AND my_ord.buyer_id = %s 
                 AND my_ord.status IN ('pending', 'in_progress')
+                
+            -- 2. Джоиним АКТИВНЫЙ ЗАКАЗ на эту услугу (если я Заказчик/Провайдер)
+            LEFT JOIN service_orders provider_ord
+                ON s.id = provider_ord.service_id
+                AND s.provider_id = %s
+                AND provider_ord.status IN ('pending', 'in_progress')
+                
             WHERE 
                 (s.active = 1) OR (s.provider_id = %s)
             ORDER BY s.created_at DESC
             """
-            # Передаем user_uuid два раза (для my_ord и для WHERE)
-            cur.execute(query, (user_uuid, user_uuid))
+            # Передаем user_uuid три раза (1 - для my_ord, 2 - для provider_ord, 3 - для WHERE)
+            cur.execute(query, (user_uuid, user_uuid, user_uuid))
             rows = cur.fetchall()
             
             result = []
             for row in rows:
                 status = row['base_status'] or 'open'
                 
-                # Если Я взял этот заказ, перекрываем статус моим статусом
-                if row['my_order_status']:
-                    status = row['my_order_status']
+                # 🔥 Логика статусов 2.0
+                is_my_task = (str(row['provider_id']) == str(user_uuid))
+                order_id_to_return = None
+                
+                if is_my_task:
+                    # Если я Заказчик, и кто-то взял таску в работу — показываем статус заказа
+                    if row['provider_order_status']:
+                        status = row['provider_order_status']
+                        order_id_to_return = row['provider_order_id']
+                else:
+                    # Если я Исполнитель, показываем статус МОЕГО заказа
+                    if row['my_order_status']:
+                        status = row['my_order_status']
+                        order_id_to_return = row['my_order_id']
 
-                # 🔥 Фикс типизации: всегда отдаём ЧИСЛО (Int). -1 означает безлимит.
+
                 remaining_orders = -1 
                 if row['max_orders'] is not None:
-                    # Защита от отрицательных значений
                     remaining_orders = max(0, row['max_orders'] - row['orders_completed'])
 
                 service_info = {
@@ -327,14 +345,14 @@ class Database:
                     'description': row['description'],
                     'points_cost': row['points_cost'],
                     'provider_name': row['provider_name'],
-                    'is_my_task': (str(row['provider_id']) == str(user_uuid)),
-                    'am_i_executor': bool(row['my_order_id']), # Если есть мой заказ — я исполнитель
+                    'is_my_task': is_my_task,
+                    'am_i_executor': bool(row['my_order_id']),
                     'status': status,
-                    'order_id': row['my_order_id'],
-                    'remaining_orders': remaining_orders, # Чистый Int! Фронт сам пишет "Неограниченно" если -1
+                    'order_id': order_id_to_return, # 🔥 Важно! Отдаем ID заказа Заказчику, чтобы он мог его принять
+                    'remaining_orders': remaining_orders,
                     'max_orders': row['max_orders'],
                     'orders_completed': row['orders_completed'],
-                    'is_active': bool(row['active']) # Добавили потеряшку
+                    'is_active': bool(row['active'])
                 }
                 result.append(service_info)
                 
@@ -453,6 +471,17 @@ class Database:
             
             # Обновляем статус заказа
             cur.execute("UPDATE service_orders SET status = 'completed' WHERE id = %s", (order_id,))
+
+            # 🔥 ЗАКРЫВАЕМ УСЛУГУ (Мягкое удаление)
+            # Увеличиваем счетчик выполненных заказов
+            cur.execute("UPDATE services SET orders_completed = orders_completed + 1 WHERE id = %s", (order['service_id'],))
+
+            # Если у услуги лимит заказов 1 (разовая таска), или лимит исчерпан — гасим её
+            cur.execute("""
+                UPDATE services 
+                SET active = 0, status = 'completed' 
+                WHERE id = %s AND (max_orders IS NULL OR orders_completed >= max_orders)
+            """, (order['service_id'],))
             
             # Списываем у клиента
             cur.execute("""
@@ -608,22 +637,6 @@ class Database:
             conn.close()
 
     # --- МЕРЧ (Студсовет) ---
-    
-    def add_new_merch(self, name, description, price, stock):
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            m_id = str(uuid.uuid4())
-            cur.execute("""
-                INSERT INTO merch (id, name, description, price_points, stock)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (m_id, name, description, price, stock))
-            conn.commit()
-            return True, "Товар добавлен"
-        except Exception as e:
-            return False, str(e)
-        finally:
-            conn.close()
     def add_new_merch(self, name, description, price, stock, image_url=""):
         conn = self._get_connection()
         try:

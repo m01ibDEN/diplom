@@ -582,6 +582,23 @@ class Database:
             return False, str(e)
         finally:
             conn.close()
+    def delete_merch(self, merch_id):
+
+        conn = self._get_connection()
+        if not conn:
+            return False, "Ошибка подключения к БД"
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM merch WHERE id = %s", (merch_id,))
+            if cur.rowcount == 0:
+                return False, "Товар не найден"
+            conn.commit()
+            return True, "Товар удален"
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
+        finally:
+            conn.close()
 
     def create_merch_order(self, tg_id, merch_id):
         conn = self._get_connection()

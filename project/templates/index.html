@@ -607,11 +607,22 @@
 
     <!-- АДМИНКА -->
     <div id="admin" class="content-section role-protected">
-        <h3>Администрирование</h3>
-        <div class="card">
-            <div id="admin-stats">Загрузка...</div>
-        </div>
+    <h3>Администрирование</h3>
+    <div class="card">
+        <div id="admin-stats">Загрузка...</div>
     </div>
+    <div class="card" style="margin-top:20px;">
+        <h4>Начислить баллы</h4>
+        <input type="number" id="grant-target-id" class="input" placeholder="Telegram ID получателя">
+        <input type="number" id="grant-amount" class="input" placeholder="Сумма">
+        <button class="btn" onclick="grantPoints()">Начислить</button>
+    </div>
+    <div class="card" style="margin-top:20px; border-color:#f44336;">
+        <h4 style="color:#f44336;">Опасная зона</h4>
+        <p style="font-size:12px; margin-bottom:10px;">...</p>
+        <button class="btn btn-danger" onclick="resetAllData()">Полное обнуление года</button>
+    </div>
+</div>
 
     <!-- НИЖНЕЕ МЕНЮ -->
     <div class="tabs">
@@ -685,7 +696,7 @@
                 document.getElementById('admin')?.classList.remove('role-protected');
             }
 
-            // 3. 🔥 ПРАВА ДЛЯ АУКЦИОНОВ (Резня для студентов) 🔥
+            // 3. ПРАВА ДЛЯ АУКЦИОНОВ (Резня для студентов) 
             const auctionPanel = document.getElementById('council-auctions-panel');
             if (auctionPanel) {
                 if (isStaff) {
@@ -1208,6 +1219,59 @@
             `;
             });
         }
+        // Функция для полного обнуления
+function resetAllData() {
+    uiConfirm('Вы уверены? Все данные (история, заказы, аукционы, балансы) будут безвозвратно удалены. Начать новый учебный год?', (ok) => {
+        if (!ok) return;
+        fetch('/api/admin/reset_all_data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: userId})
+        })
+        .then(r => r.json())
+        .then(res => {
+            uiAlert(res.message);
+            if (res.success) {
+                // После обнуления переключаемся на главную и обновляем все данные
+                showTab('main', document.querySelector('.tab'));
+                updateAllData();
+                loadMerch();
+            }
+        })
+        .catch(err => uiAlert('Ошибка: ' + err));
+    });
+}
+
+// Функция для ручного начисления баллов
+function grantPoints() {
+    const targetId = document.getElementById('grant-target-id').value;
+    const amount = document.getElementById('grant-amount').value;
+    if (!targetId || !amount || amount <= 0) {
+        uiAlert('Введите корректные данные');
+        return;
+    }
+    fetch('/api/admin/grant_points', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            admin_id: userId,
+            target_user_id: parseInt(targetId),
+            amount: parseInt(amount)
+        })
+    })
+    .then(r => r.json())
+    .then(res => {
+        uiAlert(res.message);
+        if (res.success) {
+            // Очистить поля ввода после успеха
+            document.getElementById('grant-target-id').value = '';
+            document.getElementById('grant-amount').value = '';
+            // Можно обновить баланс текущего пользователя, если он начислил себе
+            updateAllData();
+        }
+    })
+    .catch(err => uiAlert('Ошибка: ' + err));
+}
 
         // --- ACTIONS (FORMS) ---
 

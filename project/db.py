@@ -2,6 +2,7 @@ import mysql.connector
 import os
 import uuid
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -1262,6 +1263,7 @@ class Database:
         finally:
             conn.close()
 
+    
     def validate_api_key(self, api_key):
         """Проверяет наличие и активность API ключа"""
         conn = self._get_connection()
@@ -1330,8 +1332,92 @@ class Database:
             return False, str(e)
         finally:
             conn.close()
+    from datetime import datetime  # добавьте этот импорт в начало файла, если его нет
 
 
+    def reset_all_data(self, admin_telegram_id):
+
+        # Проверка прав
+        admin = self.get_student_by_tg_id(admin_telegram_id)
+        if not admin or admin['role'] != 'admin':
+            return False, "Недостаточно прав"
+
+        conn = self._get_connection()
+        if not conn:
+            return False, "Ошибка подключения к БД"
+
+        try:
+            cur = conn.cursor()
+
+            # Очищаем таблицы в правильном порядке (с учетом внешних ключей)
+            tables_to_clear = [
+                'bids',
+                'auctions',
+                'service_orders',
+                'merch_orders',
+                'student_activities',
+                'transactions',
+                'ranking'
+            ]
+            for table in tables_to_clear:
+                cur.execute(f"DELETE FROM {table}")
+
+            # Обнуляем балансы
+            cur.execute("UPDATE balances SET current_points = 0, total_earned = 0, total_spent = 0")
+
+            # Записываем дату последнего обнуления в настройки (опционально)
+            cur.execute("""
+                INSERT INTO settings (`key`, value, description) 
+                VALUES ('last_reset', NOW(), 'Дата последнего обнуления')
+                ON DUPLICATE KEY UPDATE value = NOW()
+            """)
+
+            conn.commit()
+            return True, "Все данные успешно обнулены"
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
+        finally:
+            conn.close()
+    
+    from datetime import datetime  # добавьте этот импорт в начало файла, если его нет
+
+def apply_monthly_bonus(self, amount=100):
+    conn = self._get_connection()
+    if not conn:
+        print("[MONTHLY BONUS] Нет соединения с БД")
+        return
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Проверяем, было ли начисление в этом месяце
+        now = datetime.now()
+        first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM transactions
+            WHERE description = 'Ежемесячное начисление'
+            AND created_at >= %s
+        """, (first_day,))
+        if cur.fetchone()['cnt'] > 0:
+            print(f"[MONTHLY BONUS] Уже начисляли в этом месяце, пропускаем")
+            return
+
+        # Получаем всех студентов
+        cur.execute("SELECT id FROM students")
+        students = cur.fetchall()
+
+        success_count = 0
+        for student in students:
+            ok, msg = self.add_points(student['id'], amount, "Ежемесячное начисление")
+            if ok:
+                success_count += 1
+            else:
+                print(f"Ошибка для {student['id']}: {msg}")
+
+        print(f"[MONTHLY BONUS] Начислено {amount} баллов {success_count} студентам")
+    except Exception as e:
+        print(f"[MONTHLY BONUS] Ошибка: {e}")
+    finally:
+        conn.close()
 
 # Создаем единственный экземпляр
 db = Database()

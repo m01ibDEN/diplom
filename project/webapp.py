@@ -216,7 +216,7 @@ def api_place_bid():
         if not all([auction_id, tg_user_id, bid_amount]):
             return jsonify({'success': False, 'message': 'Чего-то не хватает! Либо лота нет, либо юзера, либо ставки.'}), 400
             
-        # 🔥 ВЫЗЫВАЕМ МЕТОД из твоего класса БД 🔥
+        
         # Убедись, что метод `place_bid` добавлен в твой класс работы с БД!
         success, message = db.place_bid(auction_id, tg_user_id, bid_amount)
         
@@ -257,7 +257,7 @@ def api_create_custom_auction():
         if not all([tg_user_id, title, start_price, end_time_str]):
              return jsonify({'success': False, 'message': 'Заполни название, цену и время!'}), 400
              
-        # 🔥 Вызываем наш могучий метод из класса БД (который мы писали при рефакторинге) 🔥
+        
         # (Убедись, что метод create_standalone_auction добавлен в твой класс db!)
         success, message = db.create_standalone_auction(
             tg_user_id, title, description, image_url, start_price, end_time_str
@@ -534,6 +534,40 @@ def api_admin_stats():
         return jsonify({"error": "No access"}), 403
     return jsonify(db.get_admin_stats())
 
+@app.route('/api/admin/reset_all_data', methods=['POST'])
+def api_reset_all_data():
+    try:
+        data = request.json
+        admin_id = data.get('user_id')
+        if not admin_id:
+            return jsonify({"success": False, "message": "No user_id"}), 400
+
+        success, msg = db.reset_all_data(admin_id)
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/admin/grant_points', methods=['POST'])
+def api_grant_points():
+    try:
+        data = request.json
+        admin_id = data.get('admin_id')          # кто выдаёт
+        target_tg_id = data.get('target_user_id') # кому выдаём (telegram_id)
+        amount = int(data.get('amount'))
+
+        admin = db.get_student_by_tg_id(admin_id)
+        if not admin or admin['role'] != 'admin':
+            return jsonify({"success": False, "message": "Нет прав"}), 403
+
+        target = db.get_student_by_tg_id(target_tg_id)
+        if not target:
+            return jsonify({"success": False, "message": "Получатель не найден"}), 404
+
+        success, msg = db.add_points(target['id'], amount, f"Начислено администратором")
+        return jsonify({"success": success, "message": msg, "new_balance": target['current_points'] + amount if success else target['current_points']})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route('/api/create_activity', methods=['POST'])
 def api_create_activity():
     data = request.json
@@ -561,6 +595,7 @@ scheduler = BackgroundScheduler()
 # Добавляем задачу: крутить функцию каждую минуту (60 сек)
 scheduler.add_job(func=run_auction_bot, trigger="interval", seconds=60)
 
+scheduler.add_job(func=db.apply_monthly_bonus, trigger='cron', day=1, hour=0, minute=5)
 # Запускаем фон!
 scheduler.start()
 

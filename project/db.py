@@ -191,7 +191,7 @@ class Database:
         if not conn: return []
         try:
             cur = conn.cursor(dictionary=True)
-            cur.execute("SELECT * FROM merch WHERE stock > 0 ORDER BY price_points ASC")
+            cur.execute("SELECT * FROM merch ORDER BY price_points ASC")
             return cur.fetchall()
         finally:
             conn.close()

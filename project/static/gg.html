@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>University Library - Payment</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .card { border: 1px solid #ccc; padding: 20px; border-radius: 8px; max-width: 400px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>Библиотека МГТУ</h1>
+        <p>Вы должны оплатить штраф за просроченную книгу "Сопромат".</p>
+        
+        <!-- Сюда будем выводить информацию о пользователе -->
+        <div id="user-info" style="margin-bottom: 15px; color: #666;">
+            Пользователь не определен...
+        </div>
+
+        <!-- Контейнер для кнопки оплаты SDK -->
+        <div id="payment-container"></div>
+    </div>
+
+    <!-- 1. Подключаем SDK -->
+    <!-- Убедись, что адрес правильный (ngrok) -->
+    <script src="https://gigglingly-putrid-walter.ngrok-free.dev/static/student-coins-sdk.js"></script>
+
+    <script>
+        const API_KEY = "site_library_key"; 
+        const BACKEND_URL = "https://gigglingly-putrid-walter.ngrok-free.dev";
+
+        // Долг студента (логика библиотеки)
+        let myLibraryFine = 50; 
+
+        const userIdInput = prompt("Введите ваш Telegram ID:", "54321");
+
+        if (userIdInput) {
+            const userId = parseInt(userIdInput);
+            
+            StudentCoins.init(API_KEY, BACKEND_URL);
+            StudentCoins.setUser(userId);
+
+            const container = document.getElementById('payment-container');
+            const infoDiv = document.getElementById('user-info');
+
+            // Функция для красивого отображения баланса
+            function renderBalance(balance) {
+                infoDiv.innerHTML = `
+                    <div style="font-size: 1.2em; margin-bottom: 10px;">
+                        Пользователь ID: <b>${userId}</b><br>
+                        Баланс: <b style="color: #2481cc;">${balance} STC</b>
+                    </div>
+                `;
+            }
+
+            // 1. Получаем начальный баланс
+            StudentCoins.getBalance().then(data => {
+                if (data.balance !== undefined) {
+                    renderBalance(data.balance);
+                }
+            });
+
+            // 2. Рисуем кнопку
+            if (myLibraryFine > 0) {
+                const header = document.createElement('h3');
+                header.innerText = `У вас штраф: ${myLibraryFine} STC`;
+                header.style.color = "red";
+                container.appendChild(header);
+
+                StudentCoins.createPayButton(
+                    "payment-container", 
+                    myLibraryFine, 
+                    "Оплата штрафа",
+                    
+                    // Вот эта функция сработает сразу после успеха!
+                    (newBalance) => {
+                        console.log("Оплата прошла, обновляем интерфейс...");
+                        renderBalance(newBalance); // Обновляем цифру моментально
+                        header.innerText = "Штраф оплачен! Спасибо."; // Меняем текст заголовка
+                        header.style.color = "green";
+                        myLibraryFine = 0; // Обнуляем локальный долг
+                    }
+                );
+            } else {
+                container.innerHTML = `<h3 style="color:green">Долгов нет</h3>`;
+            }
+        }
+    </script>
+
+
+
+</body>
+</html>

@@ -243,6 +243,18 @@
         </div>
     </div>
 
+        <!-- ПАНЕЛЬ СТУДСОВЕТА: ЗАЯВКИ -->
+    <div id="council-orders-panel" class="role-protected card" style="display:none; border: 2px solid #ff9800;">
+        <h4>Заявки на мерч</h4>
+        <div id="council-orders-list" style="margin-top:10px;">Загрузка...</div>
+    </div>
+
+    <!-- МОИ ЗАКАЗЫ (Для всех) -->
+    <div id="my-merch-orders" class="card" style="display:none; border: 2px solid #4caf50;">
+        <h4> Мои покупки</h4>
+        <div id="my-orders-list" style="margin-top:10px;"></div>
+    </div>
+
     <div id="merch-grid" class="grid">Загрузка...</div>
   </div>
 
@@ -270,6 +282,17 @@
         <div class="faq-question">Что такое «Биржа»?</div>
         <div class="faq-answer">Это площадка, где студенты помогают друг другу. Ты можешь купить услугу у другого студента или заработать, выполнив задание.</div>
     </div>
+    <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-question">Разработчикам: Как подключить оплату?</div>
+        <div class="faq-answer">
+            Подключите скрипт <code>student-coins-sdk.js</code> на свой сайт. 
+            Используйте метод <code>StudentCoins.init(API_KEY)</code> для входа и <code>StudentCoins.createPayButton()</code> для создания кнопки оплаты.
+            <br><br>
+            За документацией и ключом API обратитесь к администраторам.
+        </div>
+    </div>
+
+
   </div>
 
   <!-- АДМИНКА -->
@@ -315,7 +338,7 @@
       </div>
   </div>
 
-  <script>
+    <script>
     const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
     if (tg) tg.expand();
 
@@ -335,18 +358,23 @@
         });
     }
 
-    function applyRoleRights() {
+        function applyRoleRights() {
         const isStaff = ['admin', 'stud_council'].includes(currentUserRole);
         const isAdmin = (currentUserRole === 'admin');
+        
         if (isStaff) {
             document.getElementById('council-activities-panel').classList.remove('role-protected');
             document.getElementById('council-merch-panel').classList.remove('role-protected');
+            
+            document.getElementById('council-orders-panel').classList.remove('role-protected');
         }
+        
         if (isAdmin) {
             document.getElementById('tab-admin').classList.remove('role-protected');
             document.getElementById('admin').classList.remove('role-protected');
         }
     }
+
 
     // --- NAVIGATION ---
     function showTab(id, el) {
@@ -466,25 +494,39 @@
             `).join('');
         });
     }
-
     function loadServices() {
         fetch(`/api/services?user_id=${userId}`).then(r => r.json()).then(data => {
-            document.getElementById('services-list').innerHTML = data.map(s => `
-                <div class="service-item">
-                    <div style="display:flex; justify-content:space-between;">
-                        <div>
-                            <div style="font-weight:bold;">${s.name}</div>
-                            <div style="font-size:12px; color:var(--tg-hint);">${s.description || ''}</div>
-                            <div style="font-size:11px; margin-top:4px;">${s.status==='open'?'Поиск исполнителя':'В работе'}</div>
-                        </div>
-                        <div style="text-align:right;">
-                            <div style="color:var(--tg-link); font-weight:bold;">${s.points_cost}</div>
-                            ${s.status === 'open' && !s.is_my_task ? `<button class="btn" style="padding:6px; font-size:12px;" onclick="takeTask('${s.id}')">Взять</button>` : ''}
-                            ${s.is_my_task && s.status === 'in_progress' ? `<button class="btn" style="padding:6px; font-size:12px; background:#4caf50;" onclick="confirmTask('${s.order_id}')">Принять</button>` : ''}
+            document.getElementById('services-list').innerHTML = data.map(s => {
+                // Статус лейбл
+                let statusLabel = '🔍 Поиск исполнителя';
+                if (s.active === 0) statusLabel = '✅ Завершено';
+                else if (s.status === 'in_progress') statusLabel = '🔨 В работе';
+
+                // Кнопки
+                let actionBtn = '';
+                if (s.active === 1 && s.status === 'open' && !s.is_my_task) {
+                    actionBtn = `<button class="btn" style="padding:6px; font-size:12px;" onclick="takeTask('${s.id}')">Взять</button>`;
+                }
+                if (s.is_my_task && s.status === 'in_progress') {
+                    actionBtn = `<button class="btn" style="padding:6px; font-size:12px; background:#4caf50;" onclick="confirmTask('${s.order_id}')">Принять работу</button>`;
+                }
+
+                return `
+                    <div class="service-item" style="${s.active === 0 ? 'opacity:0.6;' : ''}">
+                        <div style="display:flex; justify-content:space-between;">
+                            <div>
+                                <div style="font-weight:bold;">${s.name}</div>
+                                <div style="font-size:12px; color:var(--tg-hint);">${s.description || ''}</div>
+                                <div style="font-size:11px; margin-top:4px;">${statusLabel}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:var(--tg-link); font-weight:bold;">${s.points_cost} STC</div>
+                                ${actionBtn}
+                            </div>
                         </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         });
     }
 
@@ -501,7 +543,10 @@
         });
     }
 
+    // --- MERCH LOGIC (UPDATED) ---
+
     function loadMerch() {
+        // 1. Загрузка товаров
         fetch('/api/merch').then(r => r.json()).then(data => {
             document.getElementById('merch-grid').innerHTML = data.map(m => `
                 <div class="merch-item" onclick="openMerchModal('${m.id}', '${m.name}', ${m.price_points}, '${m.image_url || ''}')"> 
@@ -513,7 +558,78 @@
                 </div>
             `).join('');
         });
+
+        // 2. Загрузка моих покупок
+        loadMyOrders();
+
+        // 3. Загрузка заявок (если Студсовет)
+        if (['admin', 'stud_council'].includes(currentUserRole)) {
+            document.getElementById('council-orders-panel').style.display = 'block';
+            loadCouncilOrders();
+        }
     }
+
+    function loadMyOrders() {
+        fetch(`/api/merch/my_orders?user_id=${userId}`).then(r => r.json()).then(orders => {
+            if (orders.length > 0) {
+                document.getElementById('my-merch-orders').style.display = 'block';
+                document.getElementById('my-orders-list').innerHTML = orders.map(o => {
+                    let statusHtml = '';
+                    if(o.status === 'pending') statusHtml = '<span style="color:orange">Ждет подтверждения</span>';
+                    if(o.status === 'rejected') statusHtml = '<span style="color:red">Отклонено</span>';
+                    if(o.status === 'approved') statusHtml = `<span style="color:green">Код: <b>${o.secret_code}</b></span>`;
+                    
+                    return `
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #eee; padding:8px 0;">
+                        <div style="display:flex; align-items:center;">
+                            <img src="${o.image_url || '/static/merch_placeholder.png'}" style="width:40px; height:40px; border-radius:4px; margin-right:10px; object-fit:cover;">
+                            <div>
+                                <div style="font-weight:600; font-size:13px;">${o.name}</div>
+                                <div style="font-size:11px;">${statusHtml}</div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+        });
+    }
+
+    function loadCouncilOrders() {
+        fetch('/api/merch/orders/pending').then(r => r.json()).then(orders => {
+            if (orders.length === 0) {
+                document.getElementById('council-orders-list').innerHTML = '<div style="font-size:12px; color:gray; padding:10px; text-align:center;">Заявок нет</div>';
+                return;
+            }
+            document.getElementById('council-orders-list').innerHTML = orders.map(o => `
+                <div style="background:white; padding:10px; border-radius:8px; margin-bottom:8px; border:1px solid #eee;">
+                    <div style="font-weight:bold; font-size:13px;">${o.merch_name}</div>
+                    <div style="font-size:12px; color:gray; margin-bottom:8px;">
+                        Покупатель: ${o.first_name} ${o.last_name}<br>
+                        Дата: ${new Date(o.created_at).toLocaleDateString()}
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn" style="flex:1; background:#4caf50; padding:6px; font-size:12px; height:auto;" onclick="processOrder('${o.id}', 'approve')">Одобрить</button>
+                        <button class="btn btn-secondary" style="flex:1; color:#f44336; padding:6px; font-size:12px; height:auto;" onclick="processOrder('${o.id}', 'reject')">Отказать</button>
+                    </div>
+                </div>
+            `).join('');
+        });
+    }
+
+    function processOrder(oid, action) {
+        if(!confirm(action === 'approve' ? 'Выдать товар?' : 'Отменить заказ?')) return;
+        
+        fetch('/api/merch/orders/approve', {
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({order_id: oid, action: action})
+        }).then(r => r.json()).then(res => {
+            uiAlert(res.message);
+            loadCouncilOrders(); // Обновить список
+        });
+    }
+
+    // --- ADMIN STATS ---
 
     function loadAdminStats() {
         fetch(`/api/admin/stats?user_id=${userId}`).then(r => r.json()).then(s => {
@@ -530,7 +646,8 @@
         });
     }
 
-    // --- ACTIONS ---
+    // --- ACTIONS (FORMS) ---
+
     function createService() {
         const name = document.getElementById('svc-name').value;
         const price = document.getElementById('svc-price').value;
@@ -538,8 +655,12 @@
         fetch('/api/add_service', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({user_id: userId, name, points_cost: price, description: desc})
-        }).then(r=>r.json()).then(res => { uiAlert(res.message); toggleForm('create-service-card'); loadServices(); });
-    }
+        }).then(r=>r.json()).then(res => { 
+            uiAlert(res.success ? res.message : res.message); 
+            toggleForm('create-service-card'); 
+            loadServices(); 
+        });
+        }
 
     function createActivity() {
         fetch('/api/create_activity', {
@@ -580,15 +701,34 @@
          fetch('/api/take_task', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({user_id: userId, service_id: id})
-        }).then(r=>r.json()).then(res => { uiAlert(res.message); loadServices(); });
+        }).then(r=>r.json()).then(res => { 
+            uiAlert(res.success ? res.message : res.message); 
+            loadServices(); 
+        });
+
     }
     
     function confirmTask(oid) {
-         fetch('/api/confirm_task', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
+        fetch('/api/confirm_task', {
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({user_id: userId, order_id: oid})
-        }).then(r=>r.json()).then(res => { uiAlert(res.message); updateAllData(); loadServices(); });
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.success) {
+                uiAlert(res.message);
+            } else {
+                uiAlert(res.message || 'Ошибка сервера');
+            }
+            loadServices();  // Обновляем список услуг
+            updateAllData(); // Обновляем баланс
+        })
+        .catch(err => {
+            uiAlert('Ошибка сети: ' + err);
+        });
     }
+
     
     function buyCurrentMerch() {
          uiConfirm(`Заказать товар?`, (ok) => {
@@ -634,9 +774,11 @@
     }
 
     function uiAlert(msg) {
-      if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showAlert(msg);
-      else alert(msg);
+        console.log('DEBUG uiAlert:', msg);  // Покажет в консоли что реально приходит
+        if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showAlert(msg);
+        else alert(JSON.stringify(msg));  // Покажет объект целиком
     }
+
     
     function uiConfirm(msg, callback) {
       if (tg && tg.showPopup && isVersionAtLeast('6.2')) tg.showConfirm(msg, callback);
@@ -646,5 +788,6 @@
     // START
     init();
   </script>
+
 </body>
 </html>

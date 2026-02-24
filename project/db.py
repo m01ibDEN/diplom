@@ -250,68 +250,8 @@ class Database:
     # ==========================
     # БЛОК УСЛУГ (БИРЖА)
     # ==========================
-
-    def get_all_services(self, current_user_tg_id):
-        """
-        Возвращает список услуг + статус для текущего юзера.
-        Использует LEFT JOIN с service_orders, чтобы понять, занята ли задача.
-        """
-        user_uuid = self._get_student_uuid(current_user_tg_id)
-        # Если юзера нет, вернем пустой список или ошибку, но лучше пустой список чтоб не падало
-        if not user_uuid: 
-            # Можно попробовать создать юзера "на лету" если это тест
-            return []
-
-        conn = self._get_connection()
-        if not conn: return []
-        try:
-            cur = conn.cursor(dictionary=True)
-            
-            # Выбираем услуги.
-            # Если service_orders существует с активным статусом -> задача занята.
-            # Нам нужно знать order_id, чтобы подтвердить выполнение.
-            query = """
-            SELECT 
-                s.id, s.name, s.description, s.points_cost, s.provider_id,
-                st.first_name as provider_name,
-                ord.id as order_id,
-                ord.buyer_id as executor_id,
-                ord.status as order_status
-            FROM services s
-            JOIN students st ON s.provider_id = st.id
-            LEFT JOIN service_orders ord ON s.id = ord.service_id 
-                 AND ord.status IN ('pending', 'in_progress', 'completed')
-            WHERE s.active = 1
-            ORDER BY s.created_at DESC
-            """
-            cur.execute(query)
-            rows = cur.fetchall()
-            
-            result = []
-            for row in rows:
-                status = 'open'
-                # Определяем статус для фронтенда
-                if row['order_status'] in ['pending', 'in_progress']:
-                    status = 'in_progress'
-                elif row['order_status'] == 'completed':
-                    status = 'completed'
-
-                result.append({
-                    'id': row['id'],
-                    'name': row['name'],
-                    'description': row['description'],
-                    'points_cost': row['points_cost'],
-                    'provider_name': row['provider_name'],
-                    'is_my_task': (str(row['provider_id']) == str(user_uuid)),
-                    'am_i_executor': (str(row['executor_id']) == str(user_uuid)) if row['executor_id'] else False,
-                    'status': status,
-                    'order_id': row['order_id'] # Нужен для подтверждения
-                })
-            return result
-        finally:
-            conn.close()
-
-    def add_service(self, tg_id, name, points, desc):
+    def add_service(self, tg_id, name, points, desc, max_orders=None):
+        """Создание услуги с лимитом заказов"""
         provider_uuid = self._get_student_uuid(tg_id)
         if not provider_uuid: return False, "Студент не найден"
         
@@ -320,10 +260,14 @@ class Database:
         try:
             cur = conn.cursor()
             svc_id = str(uuid.uuid4())
-            cur.execute(
-                "INSERT INTO services (id, provider_id, name, points_cost, description, active) VALUES (%s, %s, %s, %s, %s, 1)",
-                (svc_id, provider_uuid, name, points, desc)
-            )
+            
+            # Гибридный подход: если max_orders=None, значит неограниченно
+            cur.execute("""
+                INSERT INTO services 
+                (id, provider_id, name, points_cost, description, active, max_orders, orders_completed) 
+                VALUES (%s, %s, %s, %s, %s, 1, %s, 0)
+            """, (svc_id, provider_uuid, name, points, desc, max_orders))
+            
             conn.commit()
             return True, "Услуга опубликована"
         except Exception as e:
@@ -332,8 +276,163 @@ class Database:
         finally:
             conn.close()
 
+    def get_all_services(self, current_user_tg_id):
+        user_uuid = self._get_student_uuid(current_user_tg_id)
+        if not user_uuid: return []
+
+        conn = self._get_connection()
+        if not conn: return []
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 🔥 Логика: мои закрытые услуги + общие активные
+            query = """
+            SELECT 
+                s.id, s.name, s.description, s.points_cost, s.provider_id,
+                s.max_orders, s.orders_completed, s.active,
+                st.first_name as provider_name,
+                ord.id as order_id, ord.buyer_id as executor_id, ord.status as order_status
+            FROM services s
+            JOIN students st ON s.provider_id = st.id
+            LEFT JOIN service_orders ord ON s.id = ord.service_id 
+                AND ord.status IN ('pending', 'in_progress')
+            WHERE 
+                -- Общие активные услуги
+                (s.active = 1) 
+                OR 
+                -- Мои закрытые услуги
+                (s.provider_id = %s)
+            ORDER BY s.created_at DESC
+            """
+            cur.execute(query, (user_uuid,))
+            rows = cur.fetchall()
+            
+            result = []
+            for row in rows:
+                status = 'open'  # По умолчанию
+                
+                # 🔥 ЛОГИКА СТАТУСОВ:
+                if row['order_status'] == 'in_progress':
+                    status = 'in_progress'  # Только реально активный заказ
+                elif row['order_status'] == 'pending':
+                    status = 'pending'
+
+                # Вычисляем оставшиеся заказы
+                remaining_orders = "Неограниченно"
+                if row['max_orders'] is not None:
+                    remaining_orders = row['max_orders'] - row['orders_completed']
+                    if remaining_orders <= 0:
+                        remaining_orders = "Закончилось"
+
+                service_info = {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'description': row['description'],
+                    'points_cost': row['points_cost'],
+                    'provider_name': row['provider_name'],
+                    'is_my_task': (str(row['provider_id']) == str(user_uuid)),
+                    'am_i_executor': (str(row['executor_id']) == str(user_uuid)) if row['executor_id'] else False,
+                    'status': status,
+                    'order_id': row['order_id'],
+                    'remaining_orders': remaining_orders,
+                    'max_orders': row['max_orders'],
+                    'orders_completed': row['orders_completed']
+                }
+                result.append(service_info)
+                
+            return result
+        finally:
+            conn.close()
+    def complete_service_order(self, order_id, customer_tg_id):
+        """Подтверждение с ПОЛНЫМ commit всех изменений"""
+        if not order_id: return False, "Не передан ID заказа"
+        
+        customer_uuid = self._get_student_uuid(customer_tg_id)
+        if not customer_uuid: return False, "Клиент не найден"
+        
+        conn = self._get_connection()
+        if not conn: return False, "Ошибка БД"
+        
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Получаем данные заказа
+            query = """
+            SELECT ord.id, ord.buyer_id, ord.status, 
+                s.id as service_id, s.points_cost, s.provider_id, s.name as service_name
+            FROM service_orders ord
+            JOIN services s ON ord.service_id = s.id
+            WHERE ord.id = %s
+            """
+            cur.execute(query, (order_id,))
+            order = cur.fetchone()
+            
+            print(f"[DEBUG] Заказ: {order}")
+            
+            if not order: return False, "Заказ не найден"
+            if order['status'] == 'completed': return False, "Уже оплачено"
+            
+            cost = order['points_cost']
+            executor_uuid = order['buyer_id']  # Исполнитель
+            
+            print(f"[DEBUG] Клиент: {customer_uuid}, Исполнитель: {executor_uuid}, Сумма: {cost}")
+            
+            # 2. Проверяем баланс КЛИЕНТА
+            cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (customer_uuid,))
+            customer_bal = cur.fetchone()
+            if not customer_bal or customer_bal['current_points'] < cost:
+                return False, f"Недостаточно средств ({customer_bal['current_points']} < {cost})"
+
+            # 3. Проверяем баланс ИСПОЛНИТЕЛЯ (существует ли)
+            cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (executor_uuid,))
+            executor_bal = cur.fetchone()
+            if not executor_bal:
+                return False, "Баланс исполнителя не найден"
+
+            print(f"[DEBUG] Баланс клиента ДО: {customer_bal['current_points']}, Исполнителя ДО: {executor_bal['current_points']}")
+
+            # 🔥 4. НАЧИНАЕМ ТРАНЗАКЦИЮ (явная)
+            cur.execute("START TRANSACTION")
+            
+            # Обновляем статус заказа
+            cur.execute("UPDATE service_orders SET status = 'completed' WHERE id = %s", (order_id,))
+            
+            # Списываем у клиента
+            cur.execute("""
+                UPDATE balances SET current_points = current_points - %s, total_spent = total_spent + %s 
+                WHERE student_id = %s
+            """, (cost, cost, customer_uuid))
+            
+            # Начисляем исполнителю
+            cur.execute("""
+                UPDATE balances SET current_points = current_points + %s, total_earned = total_earned + %s
+                WHERE student_id = %s
+            """, (cost, cost, executor_uuid))
+            
+            # История
+            cur.execute("""
+                INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id)
+                VALUES (%s, %s, 'spend', %s, %s, 'service', %s)
+            """, (str(uuid.uuid4()), customer_uuid, cost, f"Оплата услуги: {order['service_name']}", order_id))
+            
+            cur.execute("""
+                INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id)
+                VALUES (%s, %s, 'earn', %s, %s, 'service', %s)
+            """, (str(uuid.uuid4()), executor_uuid, cost, f"Выполнение услуги: {order['service_name']}", order_id))
+            
+            # ЯВНЫЙ COMMIT
+            conn.commit()
+            print(f"[SUCCESS] ✅ Все изменения сохранены!")
+            
+            return True, f"Оплата прошла! +{cost} STC исполнителю"
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Откат изменений: {e}")
+            return False, f"Ошибка: {str(e)}"
+        finally:
+            conn.close()
     def assign_service(self, service_id, executor_tg_id):
-        """Исполнитель берет задачу (создаем service_orders)"""
         executor_uuid = self._get_student_uuid(executor_tg_id)
         if not executor_uuid: return False, "Пользователь не найден"
 
@@ -342,28 +441,29 @@ class Database:
         try:
             cur = conn.cursor(dictionary=True)
             
-            # 1. Проверка: задача свободна?
-            # Смотрим, есть ли активные ордера на этот сервис
+            # Задача свободна?
             cur.execute("""
                 SELECT id FROM service_orders 
-                WHERE service_id = %s AND status IN ('pending', 'in_progress', 'completed')
+                WHERE service_id = %s AND status IN ('pending', 'in_progress')
             """, (service_id,))
             if cur.fetchone():
-                return False, "Задание уже занято или выполнено"
+                return False, "Задание уже занято"
 
-            # 2. Проверка: не автор ли это?
+            # Не автор ли это?
             cur.execute("SELECT provider_id FROM services WHERE id = %s", (service_id,))
             svc = cur.fetchone()
             if not svc: return False, "Услуга не найдена"
             if str(svc['provider_id']) == str(executor_uuid):
                 return False, "Нельзя выполнять свои задания"
 
-            # 3. Создаем заказ
+            # Создаем заказ
             order_id = str(uuid.uuid4())
             cur.execute("""
                 INSERT INTO service_orders (id, service_id, buyer_id, status)
                 VALUES (%s, %s, %s, 'in_progress')
             """, (order_id, service_id, executor_uuid))
+
+            cur.execute("UPDATE services SET active = 0 WHERE id = %s", (service_id,))
             
             conn.commit()
             return True, "Вы взяли задание в работу!"
@@ -373,85 +473,6 @@ class Database:
         finally:
             conn.close()
 
-    def complete_service_order(self, order_id, provider_tg_id):
-        """Заказчик подтверждает выполнение и платит"""
-        if not order_id: return False, "Не передан ID заказа"
-        
-        provider_uuid = self._get_student_uuid(provider_tg_id)
-        if not provider_uuid: return False, "Пользователь не найден"
-        
-        conn = self._get_connection()
-        if not conn: return False, "Ошибка БД"
-        try:
-            cur = conn.cursor(dictionary=True)
-            
-            # Получаем детали заказа + цену из услуги
-            query = """
-            SELECT ord.id, ord.buyer_id as executor_id, ord.status, 
-                   s.points_cost, s.provider_id, s.name as service_name
-            FROM service_orders ord
-            JOIN services s ON ord.service_id = s.id
-            WHERE ord.id = %s
-            """
-            cur.execute(query, (order_id,))
-            order = cur.fetchone()
-
-            if not order: return False, "Заказ не найден"
-            # Проверяем права (только создатель услуги может подтвердить)
-            if str(order['provider_id']) != str(provider_uuid): 
-                return False, "Вы не автор этой задачи"
-            
-            if order['status'] == 'completed': return False, "Уже оплачено"
-
-            cost = order['points_cost']
-            executor_uuid = order['executor_id']
-
-            # Проверяем баланс заказчика
-            cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (provider_uuid,))
-            bal = cur.fetchone()
-            if not bal or bal['current_points'] < cost:
-                return False, "Недостаточно средств на балансе!"
-
-            # --- ТРАНЗАКЦИЯ ---
-            
-            # 1. Обновляем статус заказа
-            cur.execute("UPDATE service_orders SET status = 'completed' WHERE id = %s", (order_id,))
-            
-            # 2. Списываем у заказчика
-            cur.execute("""
-                UPDATE balances SET current_points = current_points - %s, total_spent = total_spent + %s 
-                WHERE student_id = %s
-            """, (cost, cost, provider_uuid))
-
-            # 3. Начисляем исполнителю
-            cur.execute("""
-                UPDATE balances SET current_points = current_points + %s, total_earned = total_earned + %s
-                WHERE student_id = %s
-            """, (cost, cost, executor_uuid))
-
-            # 4. Пишем в историю (transactions)
-            # Расход
-            cur.execute("""
-                INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id)
-                VALUES (%s, %s, 'spend', %s, %s, 'service', %s)
-            """, (str(uuid.uuid4()), provider_uuid, cost, f"Оплата задачи: {order['service_name']}", order_id))
-            
-            # Доход
-            cur.execute("""
-                INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id)
-                VALUES (%s, %s, 'earn', %s, %s, 'service', %s)
-            """, (str(uuid.uuid4()), executor_uuid, cost, f"Выполнение задачи: {order['service_name']}", order_id))
-
-            conn.commit()
-            return True, "Задание подтверждено, оплата проведена!"
-        except Exception as e:
-            conn.rollback()
-            return False, str(e)
-        finally:
-            conn.close()
-    
-        # --- РОЛИ И АДМИНКА ---
-    
     def get_student_by_tg_id(self, telegram_id):
         # ОБНОВЛЕННЫЙ МЕТОД: теперь возвращает role
         conn = self._get_connection()
@@ -561,6 +582,242 @@ class Database:
             return False, str(e)
         finally:
             conn.close()
+
+    def create_merch_order(self, tg_id, merch_id):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            # 1. Получаем студента и мерч
+            cur.execute("SELECT id FROM students WHERE telegram_user_id = %s", (tg_id,))
+            student = cur.fetchone()
+            if not student: return False, "Студент не найден"
+
+            cur.execute("SELECT price_points, stock, name FROM merch WHERE id = %s", (merch_id,))
+            item = cur.fetchone()
+            if not item: return False, "Товар не найден"
+            if item['stock'] < 1: return False, "Товар закончился"
+
+            # 2. Проверяем баланс
+            cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (student['id'],))
+            balance = cur.fetchone()['current_points']
+            if balance < item['price_points']: return False, "Недостаточно средств"
+
+            # 3. Создаем заказ (статус pending)
+            # ВАЖНО: Сразу списываем баллы и резервируем товар, чтобы не ушли в минус
+            # Если откажут — вернем баллы.
+            cur.execute("UPDATE balances SET current_points = current_points - %s WHERE student_id = %s", (item['price_points'], student['id']))
+            cur.execute("UPDATE merch SET stock = stock - 1 WHERE id = %s", (merch_id,))
+            
+            order_id = str(uuid.uuid4())
+            cur.execute("""
+                INSERT INTO merch_orders (id, merch_id, buyer_id, quantity, status)
+                VALUES (%s, %s, %s, 1, 'pending')
+            """, (order_id, merch_id, student['id']))
+            
+            conn.commit()
+            return True, "Заявка создана! Ждите одобрения."
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def get_pending_orders(self):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""
+                SELECT mo.id, m.name as merch_name, s.first_name, s.last_name, mo.created_at
+                FROM merch_orders mo
+                JOIN merch m ON mo.merch_id = m.id
+                JOIN students s ON mo.buyer_id = s.id
+                WHERE mo.status = 'pending'
+                ORDER BY mo.created_at DESC
+            """)
+            return cur.fetchall()
+        finally:
+            conn.close()
+
+    def process_merch_order(self, order_id, action, secret_code=None):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            if action == 'approve':
+                cur.execute("UPDATE merch_orders SET status = 'approved', secret_code = %s WHERE id = %s", (secret_code, order_id))
+                msg = "Заказ одобрен"
+            else:
+                # Возврат средств и товара
+                cur.execute("SELECT merch_id, buyer_id FROM merch_orders WHERE id = %s", (order_id,))
+                order = cur.fetchone()
+                
+                cur.execute("SELECT price_points FROM merch WHERE id = %s", (order['merch_id'],))
+                price = cur.fetchone()['price_points']
+                
+                cur.execute("UPDATE balances SET current_points = current_points + %s WHERE student_id = %s", (price, order['buyer_id']))
+                cur.execute("UPDATE merch SET stock = stock + 1 WHERE id = %s", (order['merch_id'],))
+                cur.execute("UPDATE merch_orders SET status = 'rejected' WHERE id = %s", (order_id,))
+                msg = "Заказ отклонен, средства возвращены"
+            
+            conn.commit()
+            return True, msg
+        finally:
+            conn.close()
+
+    def get_student_merch_orders(self, tg_id):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""
+                SELECT mo.id, m.name, mo.status, mo.secret_code, m.image_url
+                FROM merch_orders mo
+                JOIN merch m ON mo.merch_id = m.id
+                JOIN students s ON mo.buyer_id = s.id
+                WHERE s.telegram_user_id = %s
+                ORDER BY mo.created_at DESC
+            """, (tg_id,))
+            return cur.fetchall()
+        finally:
+            conn.close()
+
+    def get_pending_merch_orders(self):
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            # Запрос получает заявки со статусом 'pending'
+            # + имя покупателя и название товара
+            cur.execute("""
+                SELECT mo.id, m.name as merch_name, s.first_name, s.last_name, mo.created_at
+                FROM merch_orders mo
+                JOIN merch m ON mo.merch_id = m.id
+                JOIN students s ON mo.buyer_id = s.id
+                WHERE mo.status = 'pending'
+                ORDER BY mo.created_at DESC
+            """)
+            return cur.fetchall()
+        except Exception as e:
+            print(f"Error getting pending orders: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def add_points(self, user_db_uuid, amount, description="Транзакция SDK"):
+        conn = self._get_connection()
+        if not conn: return False, "DB Connection Failed"
+        
+        try:
+            cur = conn.cursor()
+            
+            print(f"[DB] Обновляем баланс пользователя UUID={user_db_uuid} на {amount}")
+            
+            # 1. Обновляем таблицу balances (MySQL синтаксис: %s)
+            cur.execute(
+                "UPDATE balances SET current_points = current_points + %s WHERE student_id = %s", 
+                (amount, user_db_uuid)
+            )
+            
+            # 2. Обновляем total_spent или total_earned
+            if amount < 0:
+                cur.execute(
+                    "UPDATE balances SET total_spent = total_spent + %s WHERE student_id = %s", 
+                    (abs(amount), user_db_uuid)
+                )
+            else:
+                 cur.execute(
+                    "UPDATE balances SET total_earned = total_earned + %s WHERE student_id = %s", 
+                    (amount, user_db_uuid)
+                )
+
+            # 3. Записываем в transactions (используем UUID для ID транзакции)
+            trans_id = str(uuid.uuid4())
+            t_type = 'spend' if amount < 0 else 'earn'
+            # Используем abs(amount), так как в базе обычно хранят положительное число в amount + тип
+            
+            cur.execute("""
+                INSERT INTO transactions (id, student_id, type, amount, description, entity_type, entity_id)
+                VALUES (%s, %s, %s, %s, %s, 'sdk', NULL)
+            """, (trans_id, user_db_uuid, t_type, abs(amount), description))
+
+            conn.commit()
+            
+            return True, "Баланс обновлен"
+            
+        except Exception as e:
+            print(f"[DB Error] add_points: {e}")
+            conn.rollback()
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def validate_api_key(self, api_key):
+        """Проверяет наличие и активность API ключа"""
+        conn = self._get_connection()
+        if not conn: return None
+        try:
+            cur = conn.cursor(dictionary=True)
+            # Ищем активный ключ
+            query = "SELECT service_name FROM api_services WHERE api_key = %s AND is_active = 1"
+            cur.execute(query, (api_key,))
+            result = cur.fetchone()
+            
+            if result:
+                return result['service_name'] # Возвращаем имя сервиса (например, 'Biblioteka')
+            return None
+        except Exception as e:
+            print(f"[DB API CHECK ERROR] {e}")
+            return None
+        finally:
+            conn.close()
+
+    def register_student_by_card(self, telegram_id, card_number, first_name, last_name):
+        conn = self._get_connection()
+        if not conn: return False, "Ошибка подключения к БД"
+        
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            cur.execute("SELECT id, telegram_user_id FROM students WHERE student_id = %s", (card_number,))
+            existing = cur.fetchone()
+            
+            if existing:
+                if existing['telegram_user_id']:
+                    return False, "Этот номер студенческого уже привязан к другому Telegram аккаунту!"
+                else:
+                    # Сценарий "Предзагрузка": Админ загрузил номера, но без Телеграма.
+                    # Мы обновляем запись, привязывая Телеграм.
+                    cur.execute("""
+                        UPDATE students 
+                        SET telegram_user_id = %s, first_name = %s, last_name = %s 
+                        WHERE student_id = %s
+                    """, (telegram_id, first_name, last_name, card_number))
+                    
+                    # Создаем баланс, если нет
+                    cur.execute("INSERT IGNORE INTO balances (student_id, current_points) VALUES (%s, 0)", (existing['id'],))
+                    conn.commit()
+                    return True, "Успешно привязано"
+
+            # 2. Сценарий "Свободная регистрация" (если белого списка нет)
+            # Создаем нового студента с нуля
+            new_uuid = str(uuid.uuid4())
+            cur.execute("""
+                INSERT INTO students (id, telegram_user_id, student_id_number, first_name, last_name)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (new_uuid, telegram_id, card_number, first_name, last_name))
+            
+            cur.execute("INSERT INTO balances (student_id, current_points) VALUES (%s, 0)", (new_uuid,))
+            
+            conn.commit()
+            return True, "Новый профиль создан"
+            
+        except Exception as e:
+            conn.rollback()
+            # Ловим дубликаты (если telegram_id уже есть)
+            if "Duplicate entry" in str(e):
+                return False, "Вы уже зарегистрированы."
+            return False, str(e)
+        finally:
+            conn.close()
+
 
 
 # Создаем единственный экземпляр

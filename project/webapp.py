@@ -6,21 +6,19 @@ from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 import random
 import string
-import uuid  # <--- Был пропущен
+import uuid
 
-# Загружаем переменные окружения
 load_dotenv()
 
 app = Flask(__name__)
 
-# Настройка папки для картинок
 UPLOAD_FOLDER = 'static/uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Этот блок обрабатывает ВСЕ запросы и разрешает CORS для всего
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -28,90 +26,88 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def check_api_key(req):
-    """Проверяет API Key через базу данных"""
     key = req.headers.get('X-API-Key')
     if not key:
         return None
-    
-    # Спрашиваем у БД, есть ли такой ключ
     service_name = db.validate_api_key(key)
     return service_name
 
+
 def send_telegram_notification(user_id, text):
     token = os.getenv("BOT_TOKEN")
-    if not token: return
+    if not token:
+        return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         requests.post(url, json={"chat_id": user_id, "text": text, "parse_mode": "HTML"})
     except Exception as e:
-        print(f"[ERROR] Ошибка отправки: {e}")
+        print(f"[ERROR] Ошибка отправки уведомления: {e}")
 
-# --- SDK API ---
 
 @app.route('/api/sdk/balance', methods=['GET', 'OPTIONS'])
 def sdk_get_balance():
-    if request.method == 'OPTIONS': return jsonify({'status': 'ok'}), 200
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
 
     service_name = check_api_key(request)
-    if not service_name: return jsonify({"error": "Invalid API Key"}), 401
-    
+    if not service_name:
+        return jsonify({"error": "Invalid API Key"}), 401
+
     tg_id = request.args.get('user_id')
     user = db.get_student_by_tg_id(tg_id)
-    if not user: return jsonify({"error": "User not found"}), 404
-    
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
     return jsonify({"balance": user['current_points']})
+
 
 @app.route('/api/sdk/transaction', methods=['POST', 'OPTIONS'])
 def sdk_transaction():
-    if request.method == 'OPTIONS': return jsonify({'status': 'ok'}), 200
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
 
     try:
         service_name = check_api_key(request)
-        if not service_name: return jsonify({"error": "Invalid API Key"}), 401
-        
+        if not service_name:
+            return jsonify({"error": "Invalid API Key"}), 401
+
         data = request.json
         tg_id = data.get('user_id')
         amount = int(data.get('amount'))
         type_ = data.get('type')
-        # Исправление кодировки (на всякий случай, если клиент шлет latin-1 вместо utf-8)
         desc_raw = data.get('description', '')
-        # desc = desc_raw.encode('latin1').decode('utf-8') # Раскомментируй, если кракозябры останутся
         desc = f"[{service_name}] {desc_raw}"
-        
+
         user = db.get_student_by_tg_id(tg_id)
-        if not user: return jsonify({"error": "User not found"}), 404
-        
-        print(f"[SDK] Transaction: {tg_id} {type_} {amount} ({desc})") # Логируем
-        
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        print(f"[SDK] Transaction: {tg_id} {type_} {amount} ({desc})")
+
         if type_ == 'spend':
             if user['current_points'] < amount:
                 return jsonify({"success": False, "message": "Недостаточно средств"}), 400
-            
-            # 🔥 ВАЖНО: Используем универсальный метод add_points с отрицательным значением
-            # Проверь, как называется метод в твоем db.py! Обычно это add_points
-            db.add_points(user['id'], -amount, desc) 
-            
+            db.add_points(user['id'], -amount, desc)
+
         elif type_ == 'earn':
-             db.add_points(user['id'], amount, desc)
-        
-        # Получаем обновленный баланс
+            db.add_points(user['id'], amount, desc)
+
         updated_user = db.get_student_by_tg_id(tg_id)
         return jsonify({"success": True, "new_balance": updated_user['current_points']})
-        
+
     except Exception as e:
-        print(f"[SDK ERROR] {e}") # Вывод ошибки в консоль сервера
+        print(f"[SDK ERROR] {e}")
         return jsonify({"success": False, "message": f"Server Error: {str(e)}"}), 500
-    
-# Это роут, который отдает саму HTML-страницу! Без него будет 404.
+
+
 @app.route('/auctions', methods=['GET'])
 def auctions_page():
     user_id = request.args.get('user_id')
     if not user_id:
-        return "А где твой user_id, бро?", 400
-        
+        return "Отсутствует параметр user_id", 400
+
     conn = db._get_connection()
     if conn:
         cur = conn.cursor(dictionary=True)
@@ -121,36 +117,36 @@ def auctions_page():
         conn.close()
     else:
         role = 'student'
-        
+
     return render_template('auctions.html', user_id=user_id, role=role)
+
 
 @app.route('/api/auctions/delete', methods=['POST'])
 def api_delete_auction():
     data = request.get_json()
-    
+
     tg_user_id = data.get('user_id')
     auction_id = data.get('auction_id')
-    
+
     if not tg_user_id or not auction_id:
-        return jsonify({'success': False, 'message': 'Нет ID юзера или лота'}), 400
-        
+        return jsonify({'success': False, 'message': 'Отсутствует идентификатор пользователя или лота'}), 400
+
     success, message = db.delete_auction(tg_user_id, auction_id)
-    
+
     if success:
         return jsonify({'success': True, 'message': message}), 200
     else:
         return jsonify({'success': False, 'message': message}), 400
 
+
 @app.route('/api/auctions', methods=['GET'])
 def api_get_auctions_list():
-    """Отдаёт список всех открытых лотов"""
     conn = db._get_connection()
     if not conn:
         return jsonify([]), 500
-        
+
     try:
         cur = conn.cursor(dictionary=True)
-        # Достаем все открытые аукционы, сортируем по времени (кто быстрее кончится — тот первый)
         cur.execute("""
             SELECT id, title, description, image_url, start_price, current_bid, end_time, status 
             FROM auctions 
@@ -158,150 +154,163 @@ def api_get_auctions_list():
             ORDER BY end_time ASC
         """)
         auctions_list = cur.fetchall()
-        
-        # MySQL отдаёт datetime как объект, его нужно конвертнуть в строку для JSON
+
         for auc in auctions_list:
             if auc['end_time']:
                 auc['end_time'] = auc['end_time'].strftime('%Y-%m-%d %H:%M')
-                
+
         return jsonify(auctions_list), 200
-        
+
     except Exception as e:
         print(f"[ERROR] Ошибка получения списка аукционов: {e}")
         return jsonify([]), 500
     finally:
         conn.close()
 
+
 from flask import request, render_template
+
+
+@app.route('/api/register', methods=['POST'])
+def api_register_student():
+    data = request.get_json()
+    tg_id = data.get('user_id')
+    student_id = data.get('student_id')
+    password = data.get('password')
+
+    if not all([tg_id, student_id, password]):
+        return jsonify({'success': False, 'message': 'Заполните все поля'}), 400
+
+    success, msg = db.register_new_student(tg_id, student_id, password)
+
+    if success:
+        return jsonify({'success': True, 'message': msg}), 200
+    else:
+        return jsonify({'success': False, 'message': msg}), 400
+
+
+@app.route('/api/pin/setup', methods=['POST'])
+def api_setup_pin():
+    data = request.get_json()
+    success, msg = db.set_user_pin(data.get('user_id'), data.get('pin'))
+    return jsonify({'success': success, 'message': msg})
+
+
+@app.route('/api/pin/verify', methods=['POST'])
+def api_verify_pin():
+    data = request.get_json()
+    success, msg = db.verify_user_pin(data.get('user_id'), data.get('pin'))
+    return jsonify({'success': success, 'message': msg})
+
 
 @app.route('/auction_detail', methods=['GET'])
 def auction_detail_page():
     auction_id = request.args.get('id')
     user_id = request.args.get('user_id')
-    
+
     if not auction_id or not user_id:
-         return "Где параметры?", 400
-         
-    # Узнаем роль юзера, чтобы скрыть кнопку
+        return "Отсутствуют обязательные параметры", 400
+
     conn = db._get_connection()
     cur = conn.cursor(dictionary=True)
     cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (user_id,))
     user = cur.fetchone()
     role = user['role'] if user else 'student'
     conn.close()
-    
+
     auction = db.get_auction_details(auction_id)
     if not auction:
-         return "Упс, лот исчез!", 404
-         
-    # Прокидываем role в HTML!
+        return "Лот не найден", 404
+
     return render_template('auction_detail.html', auction=auction, user_id=user_id, role=role)
 
 
 @app.route('/api/auctions/bid', methods=['POST'])
 def api_place_bid():
-    """Студент ставит свои кровные STC на аукционе"""
     try:
         data = request.get_json()
-        
+
         auction_id = data.get('auction_id')
-        tg_user_id = data.get('user_id') # Это твой telegram_user_id (например, 588388231)
-        
-        # Конвертируем ставку в целое число с защитой от дурака
+        tg_user_id = data.get('user_id')
+
         try:
             bid_amount = int(data.get('bid_amount'))
         except (TypeError, ValueError):
-            return jsonify({'success': False, 'message': 'Эу, братик, ставка должна быть числом!'}), 400
-            
+            return jsonify({'success': False, 'message': 'Ставка должна быть числом'}), 400
+
         if not all([auction_id, tg_user_id, bid_amount]):
-            return jsonify({'success': False, 'message': 'Чего-то не хватает! Либо лота нет, либо юзера, либо ставки.'}), 400
-            
-        
-        # Убедись, что метод `place_bid` добавлен в твой класс работы с БД!
+            return jsonify({'success': False, 'message': 'Отсутствуют обязательные параметры'}), 400
+
         success, message = db.place_bid(auction_id, tg_user_id, bid_amount)
-        
+
         if success:
             return jsonify({'success': True, 'message': message}), 200
         else:
-            # 400 Bad Request (когда нет денег или ставка слишком мелкая)
             return jsonify({'success': False, 'message': message}), 400
 
     except Exception as e:
-        print(f"[ERROR] Ошибка ручки ставки: {e}")
-        return jsonify({'success': False, 'message': 'Внутренняя ошибка сервера при попытке поставить ставку'}), 500
+        print(f"[ERROR] Ошибка при размещении ставки: {e}")
+        return jsonify({'success': False, 'message': 'Внутренняя ошибка сервера'}), 500
 
 
 @app.route('/api/auctions/create_custom', methods=['POST'])
 def api_create_custom_auction():
-    """Студсовет выставляет новый абстрактный лот"""
     try:
         data = request.get_json()
-        
-        # Достаем данные из JSON-body
+
         tg_user_id = data.get('user_id')
-        title = data.get('name') 
+        title = data.get('name')
         description = data.get('description', '')
-        
-        # Если юзер не ввел цену — крашимся. Конвертируем в Int для страховки.
+
         try:
             start_price = int(data.get('start_price'))
         except (TypeError, ValueError):
-            return jsonify({'success': False, 'message': 'Цена должна быть числом!'}), 400
-            
-        end_time_str = data.get('end_time') # Приходит в формате 'YYYY-MM-DDTHH:MM' (из input type="datetime-local")
-        
-        # Дефолтная картинка, если Студсовет поленился закинуть свою
+            return jsonify({'success': False, 'message': 'Цена должна быть числом'}), 400
+
+        end_time_str = data.get('end_time')
         image_url = data.get('image_url', 'https://via.placeholder.com/300x150?text=Аукцион')
-        
-        # Защита от дурака: проверим, все ли важные поля на месте
+
         if not all([tg_user_id, title, start_price, end_time_str]):
-             return jsonify({'success': False, 'message': 'Заполни название, цену и время!'}), 400
-             
-        
-        # (Убедись, что метод create_standalone_auction добавлен в твой класс db!)
+            return jsonify({'success': False, 'message': 'Заполните название, цену и время'}), 400
+
         success, message = db.create_standalone_auction(
             tg_user_id, title, description, image_url, start_price, end_time_str
         )
-        
+
         if success:
             return jsonify({'success': True, 'message': message}), 200
         else:
             return jsonify({'success': False, 'message': message}), 400
 
     except Exception as e:
-        print(f"[ERROR] Ошибка ручки создания лота: {e}")
-        return jsonify({'success': False, 'message': 'Что-то пошло не так на сервере'}), 500
+        print(f"[ERROR] Ошибка при создании лота: {e}")
+        return jsonify({'success': False, 'message': 'Внутренняя ошибка сервера'}), 500
 
 
 @app.route('/api/auctions/count', methods=['GET'])
 def api_get_auction_count():
-    # Открываем коннект к БД (через твой класс db)
     conn = db._get_connection()
     if not conn:
         return jsonify({'count': 0}), 500
-        
+
     try:
         cur = conn.cursor(dictionary=True)
-        # Считаем только те аукционы, которые открыты (status = 'open') 
-        # и время которых еще не вышло (end_time > NOW())
         cur.execute("""
             SELECT COUNT(*) as count 
             FROM auctions 
             WHERE status = 'open' AND end_time > NOW()
         """)
         result = cur.fetchone()
-        
-        # Отдаем циферку на фронт
+
         auction_count = result['count'] if result else 0
         return jsonify({'count': auction_count}), 200
-        
+
     except Exception as e:
-        print(f"[ERROR] Ошибка счетчика аукционов: {e}")
+        print(f"[ERROR] Ошибка счётчика аукционов: {e}")
         return jsonify({'count': 0}), 500
     finally:
         conn.close()
 
-# --- MERCH API ---
 
 @app.route('/api/buy_merch', methods=['POST'])
 def api_buy_merch():
@@ -309,31 +318,36 @@ def api_buy_merch():
         data = request.json
         u_id = int(data.get('user_id'))
         m_id = data.get('merch_id')
-        success, message = db.create_merch_order(u_id, m_id) # Используем создание заказа
-        if success: send_telegram_notification(u_id, f"✅ Заказ создан!\n{message}")
+        success, message = db.create_merch_order(u_id, m_id)
+        if success:
+            send_telegram_notification(u_id, f"✅ Заказ создан!\n{message}")
         return jsonify({"success": success, "message": message})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/api/merch/orders/pending', methods=['GET'])
 def get_pending_orders():
     orders = db.get_pending_merch_orders()
     return jsonify(orders)
 
+
 @app.route('/api/merch/orders/approve', methods=['POST'])
 def approve_order():
     data = request.json
     order_id = data.get('order_id')
-    action = data.get('action') 
+    action = data.get('action')
     secret_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6)) if action == 'approve' else None
     success, msg = db.process_merch_order(order_id, action, secret_code)
     return jsonify({"success": success, "message": msg})
+
 
 @app.route('/api/merch/my_orders', methods=['GET'])
 def get_my_orders():
     user_id = request.args.get('user_id')
     orders = db.get_student_merch_orders(user_id)
     return jsonify(orders)
+
 
 @app.route('/api/add_merch_item', methods=['POST'])
 def api_add_merch_item():
@@ -362,7 +376,8 @@ def api_add_merch_item():
     except Exception as e:
         print(e)
         return jsonify({"success": False, "message": str(e)}), 500
-    
+
+
 @app.route('/api/merch/delete/<merch_id>', methods=['POST'])
 def api_delete_merch(merch_id):
     try:
@@ -372,28 +387,28 @@ def api_delete_merch(merch_id):
         user_id = data.get('user_id')
         if not user_id:
             return jsonify({"success": False, "message": "No user_id"}), 400
-        
-        # Проверка прав
+
         user = db.get_student_by_tg_id(user_id)
         if not user or user['role'] not in ['admin', 'stud_council']:
             return jsonify({"success": False, "message": "Нет прав"}), 403
-        
+
         success, msg = db.delete_merch(merch_id)
         return jsonify({"success": success, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
-    
+
+
 @app.route('/api/staff/redeem', methods=['POST'])
 def api_redeem_code():
     data = request.get_json()
     user_id = data.get('user_id')
     code = data.get('code')
-    
+
     if not user_id or not code:
-        return jsonify({'success': False, 'message': 'Пустой код!'}), 400
-        
+        return jsonify({'success': False, 'message': 'Код не указан'}), 400
+
     success, message = db.redeem_secret_code(user_id, code)
-    
+
     if success:
         return jsonify({'success': True, 'message': message}), 200
     else:
@@ -407,34 +422,34 @@ def api_merch():
     except Exception as e:
         return jsonify([]), 500
 
-# --- SERVICES API ---
 
 @app.route('/api/services')
 def api_services():
     user_id = request.args.get('user_id')
-    if not user_id: return jsonify([])
+    if not user_id:
+        return jsonify([])
     try:
         return jsonify(db.get_all_services(int(user_id)))
     except Exception as e:
         return jsonify([]), 500
-    
+
+
 @app.route('/api/services/take', methods=['POST'])
 def api_take_service():
     data = request.get_json()
     service_id = data.get('service_id')
-    user_id = data.get('user_id') # Это твой telegram_user_id из фронта
-    
+    user_id = data.get('user_id')
+
     if not service_id or not user_id:
         return jsonify({'success': False, 'message': 'Нет данных'}), 400
-        
-    # Вызываем тот самый метод, который я написал тебе в прошлом ответе
-    # Предполагаем, что класс с БД называется db (или как он у тебя называется)
+
     success, message = db.take_service_order(service_id, user_id)
-    
+
     if success:
         return jsonify({'success': True, 'message': message}), 200
     else:
         return jsonify({'success': False, 'message': message}), 400
+
 
 @app.route('/api/buy_service', methods=['POST'])
 def api_buy_service():
@@ -443,21 +458,24 @@ def api_buy_service():
         u_id = int(data.get('user_id'))
         s_id = data.get('service_id')
         success, message = db.buy_service(u_id, s_id)
-        if success: send_telegram_notification(u_id, f"💼 Услуга оплачена!\n{message}")
+        if success:
+            send_telegram_notification(u_id, f"💼 Услуга оплачена!\n{message}")
         return jsonify({"success": success, "message": message})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/api/add_service', methods=['POST'])
 def api_add_service():
     try:
         data = request.json
-        if not data: return jsonify({"success": False, "message": "Нет данных"}), 400
+        if not data:
+            return jsonify({"success": False, "message": "Нет данных"}), 400
         try:
             u_id = int(str(data.get('user_id', '')).strip())
             points = int(str(data.get('points_cost', '')).strip())
         except ValueError:
-             return jsonify({"success": False, "message": "Некорректный ID или цена"}), 400
+            return jsonify({"success": False, "message": "Некорректный ID или цена"}), 400
         name = str(data.get('name', '')).strip()
         desc = str(data.get('description', '')).strip()
         if not name or points < 1:
@@ -467,6 +485,7 @@ def api_add_service():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+
 @app.route('/api/take_task', methods=['POST'])
 def api_take_task():
     try:
@@ -474,36 +493,42 @@ def api_take_task():
         u_id = int(str(data.get('user_id', '')).strip())
         svc_id = data.get('service_id')
         success, msg = db.assign_service(svc_id, u_id)
-        return jsonify({"success": success, "message": msg})
+        if success:
+            return jsonify({"success": success, "message": msg}), 200
+        else:
+            return jsonify({"success": success, "message": msg}), 400
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/api/confirm_task', methods=['POST'])
 def api_confirm_task():
     try:
         data = request.json
-        customer_id = int(data.get('user_id'))  # Клиент, который платит
-        order_id = data.get('order_id') 
-        success, msg = db.complete_service_order(order_id, customer_id)  # Передаем клиента!
+        customer_id = int(data.get('user_id'))
+        order_id = data.get('order_id')
+        success, msg = db.complete_service_order(order_id, customer_id)
         return jsonify({"success": success, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-# --- USER & ADMIN API ---
-
 @app.route('/miniapp')
 def miniapp():
     return render_template("index.html")
+
 
 @app.route('/api/user/<int:user_id>')
 def api_user(user_id):
     try:
         student = db.get_student_by_tg_id(user_id)
-        if not student: return jsonify({"error": "User not found"}), 404
+        if not student:
+            return jsonify({"error": "User not found"}), 404
         return jsonify(student)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/stats/<int:user_id>')
 def api_stats(user_id):
@@ -512,12 +537,14 @@ def api_stats(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/api/history/<int:user_id>')
 def api_history(user_id):
     try:
         return jsonify(db.get_student_history(user_id))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/leaderboard')
 def api_leaderboard():
@@ -526,6 +553,7 @@ def api_leaderboard():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/api/admin/stats')
 def api_admin_stats():
     uid = request.args.get('user_id')
@@ -533,6 +561,7 @@ def api_admin_stats():
     if not user or user['role'] != 'admin':
         return jsonify({"error": "No access"}), 403
     return jsonify(db.get_admin_stats())
+
 
 @app.route('/api/admin/reset_all_data', methods=['POST'])
 def api_reset_all_data():
@@ -547,12 +576,13 @@ def api_reset_all_data():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+
 @app.route('/api/admin/grant_points', methods=['POST'])
 def api_grant_points():
     try:
         data = request.json
-        admin_id = data.get('admin_id')          # кто выдаёт
-        target_tg_id = data.get('target_user_id') # кому выдаём (telegram_id)
+        admin_id = data.get('admin_id')
+        target_tg_id = data.get('target_user_id')
         amount = int(data.get('amount'))
 
         admin = db.get_student_by_tg_id(admin_id)
@@ -563,10 +593,12 @@ def api_grant_points():
         if not target:
             return jsonify({"success": False, "message": "Получатель не найден"}), 404
 
-        success, msg = db.add_points(target['id'], amount, f"Начислено администратором")
+        success = db.add_points(target['id'], amount, "Начислено администратором")
+        msg = "Начислено успешно" if success else "Ошибка начисления"
         return jsonify({"success": success, "message": msg, "new_balance": target['current_points'] + amount if success else target['current_points']})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/api/create_activity', methods=['POST'])
 def api_create_activity():
@@ -578,28 +610,24 @@ def api_create_activity():
     success, msg = db.create_activity(data.get('title'), int(data.get('points')), "", data.get('date'))
     return jsonify({"success": success, "message": msg})
 
+
 @app.route('/api/activities')
 def api_activities():
     return jsonify(db.get_active_activities())
 
+
 from apscheduler.schedulers.background import BackgroundScheduler
 
+
 def run_auction_bot():
-    """Обёртка для вызова метода БД"""
-    print("[AUCTION] Проверяю завершенные лоты...")
+    print("[AUCTION] Проверка завершённых лотов...")
     db.process_finished_auctions()
 
-# Инициализируем планировщик
+
 scheduler = BackgroundScheduler()
-
-# Добавляем задачу: крутить функцию каждую минуту (60 сек)
 scheduler.add_job(func=run_auction_bot, trigger="interval", seconds=60)
-
 scheduler.add_job(func=db.apply_monthly_bonus, trigger='cron', day=1, hour=0, minute=5)
-# Запускаем фон!
 scheduler.start()
 
-
-# --- ЗАПУСК ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)

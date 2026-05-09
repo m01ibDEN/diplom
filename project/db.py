@@ -11,7 +11,7 @@ class Database:
         # db.py
         self.host = os.getenv("MYSQL_HOST", "127.0.0.1")
         self.user = os.getenv("MYSQL_USER", "root")
-        self.password = os.getenv("MYSQL_PASSWORD", "password") # Теперь он найдет Danila.789
+        self.password = os.getenv("MYSQL_PASSWORD", "password")
         self.database = os.getenv("MYSQL_DB", "store")
 
 
@@ -59,14 +59,13 @@ class Database:
             conn.close()
 
     def get_student_by_tg_id(self, telegram_id):
-        """Получает инфо о студенте + баланс"""
         conn = self._get_connection()
         if not conn: return None
         try:
             cur = conn.cursor(dictionary=True)
-            # JOIN таблиц students и balances
+            # 🔥 Добавили s.pin_code в SELECT
             query = """
-                SELECT s.id, s.telegram_user_id, s.first_name, s.last_name, 
+                SELECT s.id, s.telegram_user_id, s.first_name, s.last_name, s.role, s.pin_code,
                        IFNULL(b.current_points, 0) as current_points,
                        IFNULL(b.total_earned, 0) as total_earned,
                        IFNULL(b.total_spent, 0) as total_spent
@@ -75,9 +74,62 @@ class Database:
                 WHERE s.telegram_user_id = %s
             """
             cur.execute(query, (telegram_id,))
-            return cur.fetchone()
+            user = cur.fetchone()
+            
+            if user:
+                # Отдаём фронту флаг (есть пароль или нет), сам пароль удаляем из ответа
+                user['has_pin'] = bool(user['pin_code'])
+                del user['pin_code']
+                
+            return user
         finally:
             conn.close()
+
+    def set_user_pin(self, tg_id, pin):
+        """Установка нового ПИН-кода"""
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            
+            # Чистим tg_id (убираем пробелы, превращаем в int, как мы делали везде)
+            clean_tg_id = int(tg_id)
+            
+            print(f"[DEBUG PIN] Пытаюсь сохранить PIN '{pin}' для юзера {clean_tg_id}")
+            
+            # Обновляем БД
+            cur.execute("UPDATE students SET pin_code = %s WHERE telegram_user_id = %s", (pin, clean_tg_id))
+            conn.commit()
+            
+            # Проверяем, реально ли сохранилось
+            if cur.rowcount == 0:
+                print(f"[DEBUG PIN] ВНИМАНИЕ: Запись не обновилась! Юзер с ID {clean_tg_id} не найден.")
+                return False, "Ошибка: пользователь не найден в БД!"
+                
+            print(f"[DEBUG PIN] Успешно! PIN сохранен.")
+            return True, "ПИН-код установлен!"
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"[DEBUG PIN] Ошибка SQL: {e}")
+            return False, str(e)
+        finally:
+            conn.close()
+
+
+    def verify_user_pin(self, tg_id, pin):
+        """Проверка ПИН-кода"""
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT pin_code FROM students WHERE telegram_user_id = %s", (tg_id,))
+            user = cur.fetchone()
+            
+            if user and user['pin_code'] == pin:
+                return True, "Доступ разрешен"
+            return False, "Неверный ПИН-код!"
+        finally:
+            conn.close()
+
 
     def get_or_create_student(self, telegram_id, first_name="", last_name="", username=""):
         """Создает студента, если его нет (для тестов/авторегистрации)"""
@@ -325,7 +377,7 @@ class Database:
                 order_id_to_return = None
                 
                 if is_my_task:
-                    # Если я Заказчик, и кто-то взял таску в работу — показываем статус заказа
+                    # Если я Заказчик, и кто-то взял задачу в работу — показываем статус заказа
                     if row['provider_order_status']:
                         status = row['provider_order_status']
                         order_id_to_return = row['provider_order_id']
@@ -380,21 +432,21 @@ class Database:
                 return False, "Услуга не найдена или уже неактивна"
                 
             if str(service['provider_id']) == str(executor_uuid):
-                return False, "Бро, нельзя взять свою же таску!"
+                return False, "Нельзя взять свою же задачу"
 
             # 2. Проверяем лимиты заказов (если max_orders задан)
             if service['max_orders'] is not None:
                 if service['orders_completed'] >= service['max_orders']:
-                    return False, "Упс, лимит заказов на эту услугу исчерпан"
+                    return False, "Лимит заказов на эту услугу исчерпан"
 
-            # 3. Проверяем, не взял ли этот чел её УЖЕ в работу
+            # 3. Проверяем, не взял ли этот пользователь её уже в работу
             cur.execute("""
                 SELECT id FROM service_orders 
                 WHERE service_id = %s AND buyer_id = %s AND status IN ('pending', 'in_progress')
             """, (service_id, executor_uuid))
             
             if cur.fetchone():
-                return False, "Ты уже взял эту задачу, иди делай!"
+                return False, "Вы уже взяли эту задачу в работу"
 
             # 4. СОЗДАЁМ ЗАКАЗ СО СТАТУСОМ in_progress
             import uuid
@@ -477,7 +529,7 @@ class Database:
             # Увеличиваем счетчик выполненных заказов
             cur.execute("UPDATE services SET orders_completed = orders_completed + 1 WHERE id = %s", (order['service_id'],))
 
-            # Если у услуги лимит заказов 1 (разовая таска), или лимит исчерпан — гасим её
+            # Если у услуги лимит заказов 1 (разовая задача), или лимит исчерпан — деактивируем её
             cur.execute("""
                 UPDATE services 
                 SET active = 0, status = 'completed' 
@@ -564,10 +616,10 @@ class Database:
     def place_bid(self, auction_id, student_tg_id, bid_amount):
         """Студент делает ставку на аукционе"""
         student_uuid = self._get_student_uuid(student_tg_id)
-        if not student_uuid: return False, "Кто ты, воин? Юзер не найден."
+        if not student_uuid: return False, "Пользователь не найден"
 
         conn = self._get_connection()
-        if not conn: return False, "БД прилегла отдохнуть."
+        if not conn: return False, "Ошибка подключения к БД"
 
         try:
             cur = conn.cursor(dictionary=True)
@@ -606,12 +658,12 @@ class Database:
             if bid_amount < min_required_bid:
                 return False, f"Маловато будет! Минимальная ставка сейчас: {min_required_bid} STC."
 
-            # 4. 🔥 ЧЕКАЕМ БАЛАНС И ВЕЖЛИВО ШЛЁМ НАХУЙ 🔥
+            # 4. Проверяем баланс
             cur.execute("SELECT current_points FROM balances WHERE student_id = %s", (student_uuid,))
             balance = cur.fetchone()
             
             if not balance or balance['current_points'] < bid_amount:
-                return False, f"Сорян, бро, твои финансы поют романсы. Хочешь поставить {bid_amount} STC, а в кармане только {balance['current_points'] if balance else 0}. Иди фарми коины на тасках!"
+                return False, f"Недостаточно средств. Хотите поставить {bid_amount} STC, а на балансе {balance['current_points'] if balance else 0}"
 
             # 5. Делаем дела: пишем ставку и апдейтим аукцион
             import uuid
@@ -631,7 +683,7 @@ class Database:
             """, (bid_amount, auction_id))
             
             conn.commit()
-            return True, "Ставка принята! Ты пока что батя этого лота 😎"
+            return True, "Ставка принята! Вы лидируете в этом лоте"
 
         except Exception as e:
             conn.rollback()
@@ -656,7 +708,7 @@ class Database:
         
         if not auction: return None
         
-        # Вытаскиваем историю ставок (кто ставил)
+        # Вытаскиваем историю ставок
         cur.execute("""
             SELECT b.amount, b.created_at, s.first_name, s.last_name
             FROM bids b
@@ -744,10 +796,9 @@ class Database:
                         print(f"[AUCTION BOT] Ура! Лот '{lot_title}' продан. Код победителя: {secret_code}")
                     
                     else:
-                        # ⚠️ Студент перебил ставку, а потом потратил все коины на шавуху. 
-                        # Лочим аукцион со статусом failed.
+                        # Победитель потратил средства после ставки — аукцион не состоялся
                         cur.execute("UPDATE auctions SET status = 'failed' WHERE id = %s", (auction_id,))
-                        print(f"[AUCTION BOT] Фейл. Лот '{lot_title}' сорвался: победитель оказался бомжом.")
+                        print(f"[AUCTION BOT] Ошибка. Лот '{lot_title}' не состоялся: у победителя недостаточно средств.")
                 else:
                     # На лот не поставили вообще ни одной ставки
                     cur.execute("UPDATE auctions SET status = 'no_bids' WHERE id = %s", (auction_id,))
@@ -766,19 +817,19 @@ class Database:
     def delete_auction(self, tg_user_id, auction_id):
         """Студсовет удаляет ошибочный лот (если на него еще нет ставок)"""
         conn = self._get_connection()
-        if not conn: return False, "БД прилегла."
+        if not conn: return False, "Ошибка подключения к БД"
 
         try:
             cur = conn.cursor(dictionary=True)
             
-            # 1. Защита от хакеров: проверяем роль
+            # 1. Защита от несанкционированного доступа: проверяем роль
             cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (tg_user_id,))
             user = cur.fetchone()
             
             if not user or user['role'] not in ('stud_council', 'admin'):
                 return False, "Удалять лоты могут только модераторы! 🛑"
 
-            # 2. Ищем аукцион и чекаем его статус и ставки
+            # 2. Ищем аукцион и проверяем его статус и ставки
             cur.execute("SELECT current_bid, status FROM auctions WHERE id = %s", (auction_id,))
             auction = cur.fetchone()
             
@@ -790,7 +841,7 @@ class Database:
                 
             # 3. 🔥 ЗАЩИТА СТАВОК 🔥
             if auction['current_bid'] > 0:
-                return False, "Слишком поздно! На этот лот уже пошли ставки. Удаление запрещено 💸"
+                return False, "На этот лот уже сделаны ставки. Удаление запрещено 💸"
 
             # 4. Сносим лот из базы (поскольку ставок нет, ничьи деньги не пострадают)
             cur.execute("DELETE FROM auctions WHERE id = %s", (auction_id,))
@@ -853,7 +904,7 @@ class Database:
     def create_standalone_auction(self, tg_user_id, title, description, image_url, start_price, end_time_str):
         """Студсовет выставляет уникальный лот напрямую в аукционы (без merch)"""
         conn = self._get_connection()
-        if not conn: return False, "БД прилегла."
+        if not conn: return False, "Ошибка подключения к БД"
 
         try:
             cur = conn.cursor(dictionary=True)
@@ -894,15 +945,59 @@ class Database:
         finally:
             conn.close()
 
+    def register_new_student(self, tg_id, student_id, password):
+        """Регистрация студента по студ. билету и привязка к ТГ"""
+        conn = self._get_connection()
+        if not conn: return False, "Ошибка БД"
+        
+        try:
+            cur = conn.cursor(dictionary=True)
+            
+            # 1. Проверяем, не зареган ли уже этот телеграм
+            cur.execute("SELECT id FROM students WHERE telegram_user_id = %s", (tg_id,))
+            if cur.fetchone():
+                return False, "Этот Telegram уже привязан к аккаунту!"
+                
+            # 2. Проверяем, не занят ли студенческий билет другим пользователем
+            cur.execute("SELECT id FROM students WHERE student_id = %s", (student_id,))
+            if cur.fetchone():
+                return False, "Студенческий билет с таким номером уже зарегистрирован!"
+
+            # 3. Регистрируем юзера
+            import uuid
+            new_uuid = str(uuid.uuid4())
+            
+            cur.execute("START TRANSACTION")
+            
+            # Пишем юзера (pin_code теперь играет роль пароля)
+            cur.execute("""
+                INSERT INTO students (id, telegram_user_id, student_id, pin_code, role)
+                VALUES (%s, %s, %s, %s, 'student')
+            """, (new_uuid, tg_id, student_id, password))
+            
+            # Создаем пустой баланс
+            cur.execute("INSERT INTO balances (student_id, current_points) VALUES (%s, 0)", (new_uuid,))
+            
+            conn.commit()
+            return True, "Успешная регистрация!"
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"[ERROR] Ошибка регистрации: {e}")
+            return False, "Внутренняя ошибка сервера"
+        finally:
+            conn.close()
 
     def get_student_by_tg_id(self, telegram_id):
-        # ОБНОВЛЕННЫЙ МЕТОД: теперь возвращает role
+        # ОБНОВЛЕННЫЙ МЕТОД: теперь возвращает role И статус ПИН-кода
         conn = self._get_connection()
         if not conn: return None
         try:
             cur = conn.cursor(dictionary=True)
+            
+            # 🔥 ВАЖНО: Добавили s.pin_code в SELECT 🔥
             query = """
-                SELECT s.id, s.telegram_user_id, s.first_name, s.last_name, s.role,
+                SELECT s.id, s.telegram_user_id, s.first_name, s.last_name, s.role, s.pin_code,
                        IFNULL(b.current_points, 0) as current_points,
                        IFNULL(b.total_earned, 0) as total_earned,
                        IFNULL(b.total_spent, 0) as total_spent
@@ -911,9 +1006,22 @@ class Database:
                 WHERE s.telegram_user_id = %s
             """
             cur.execute(query, (telegram_id,))
-            return cur.fetchone()
+            user = cur.fetchone()
+            
+            if user:
+                # Если в БД лежит пароль (не None и не пустота) -> has_pin = True
+                pin = user.get('pin_code')
+                user['has_pin'] = True if pin and str(pin).strip() else False
+                
+                # Безопасность: удаляем сам пароль из ответа
+                if 'pin_code' in user:
+                    del user['pin_code']
+                    
+            return user
+            
         finally:
             conn.close()
+
 
     def get_admin_stats(self):
         """Статистика для админки"""
@@ -992,16 +1100,16 @@ class Database:
     def redeem_secret_code(self, staff_tg_id, secret_code):
         """Студсовет гасит код и выдает товар студенту"""
         conn = self._get_connection()
-        if not conn: return False, "БД лежит отдыхает."
+        if not conn: return False, "Ошибка подключения к БД"
 
         try:
             cur = conn.cursor(dictionary=True)
             
-            # 1. Проверяем, что чел из Студсовета
+            # 1. Проверяем, что пользователь из Студсовета
             cur.execute("SELECT role FROM students WHERE telegram_user_id = %s", (staff_tg_id,))
             staff = cur.fetchone()
             if not staff or staff['role'] not in ('stud_council', 'admin'):
-                return False, "Куда лезешь? Выдавать лут может только Студсовет! 🛑"
+                return False, "Выдавать товары может только Студсовет! 🛑"
 
             secret_code = secret_code.strip().upper() # Защита от кривого ввода пробелов и регистра
 
@@ -1037,7 +1145,7 @@ class Database:
                 return True, f"Выдан лот: {auc['title']}\nПобедитель: {auc['first_name']} {auc['last_name']}"
 
             # Если ничего не нашли
-            return False, "Код не найден или уже использован! Гони мошенника ссаными тряпками."
+            return False, "Код не найден или уже использован!"
 
         except Exception as e:
             conn.rollback()
@@ -1382,42 +1490,42 @@ class Database:
     
     from datetime import datetime  # добавьте этот импорт в начало файла, если его нет
 
-def apply_monthly_bonus(self, amount=100):
-    conn = self._get_connection()
-    if not conn:
-        print("[MONTHLY BONUS] Нет соединения с БД")
-        return
-    try:
-        cur = conn.cursor(dictionary=True)
-        # Проверяем, было ли начисление в этом месяце
-        now = datetime.now()
-        first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        cur.execute("""
-            SELECT COUNT(*) as cnt FROM transactions
-            WHERE description = 'Ежемесячное начисление'
-            AND created_at >= %s
-        """, (first_day,))
-        if cur.fetchone()['cnt'] > 0:
-            print(f"[MONTHLY BONUS] Уже начисляли в этом месяце, пропускаем")
+    def apply_monthly_bonus(self, amount=100):
+        conn = self._get_connection()
+        if not conn:
+            print("[MONTHLY BONUS] Нет соединения с БД")
             return
+        try:
+            cur = conn.cursor(dictionary=True)
+            # Проверяем, было ли начисление в этом месяце
+            now = datetime.now()
+            first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            cur.execute("""
+                SELECT COUNT(*) as cnt FROM transactions
+                WHERE description = 'Ежемесячное начисление'
+                AND created_at >= %s
+            """, (first_day,))
+            if cur.fetchone()['cnt'] > 0:
+                print(f"[MONTHLY BONUS] Уже начисляли в этом месяце, пропускаем")
+                return
 
-        # Получаем всех студентов
-        cur.execute("SELECT id FROM students")
-        students = cur.fetchall()
+            # Получаем всех студентов
+            cur.execute("SELECT id FROM students")
+            students = cur.fetchall()
 
-        success_count = 0
-        for student in students:
-            ok, msg = self.add_points(student['id'], amount, "Ежемесячное начисление")
-            if ok:
-                success_count += 1
-            else:
-                print(f"Ошибка для {student['id']}: {msg}")
+            success_count = 0
+            for student in students:
+                ok, msg = self.add_points(student['id'], amount, "Ежемесячное начисление")
+                if ok:
+                    success_count += 1
+                else:
+                    print(f"Ошибка для {student['id']}: {msg}")
 
-        print(f"[MONTHLY BONUS] Начислено {amount} баллов {success_count} студентам")
-    except Exception as e:
-        print(f"[MONTHLY BONUS] Ошибка: {e}")
-    finally:
-        conn.close()
+            print(f"[MONTHLY BONUS] Начислено {amount} баллов {success_count} студентам")
+        except Exception as e:
+            print(f"[MONTHLY BONUS] Ошибка: {e}")
+        finally:
+            conn.close()
 
 # Создаем единственный экземпляр
 db = Database()

@@ -8,7 +8,6 @@
 
         init(apiKey, backendUrl) {
             this.apiKey = apiKey;
-            // Убираем слеш в конце URL если есть
             this.baseUrl = backendUrl ? backendUrl.replace(/\/$/, "") : "";
             console.log("SDK initialized with:", this.baseUrl);
         }
@@ -58,13 +57,29 @@
             });
         }
         
-        /**
-         * Создать кнопку оплаты с колбэком
-         * @param {string} containerId - ID элемента, куда вставить кнопку
-         * @param {number} amount - Сумма
-         * @param {string} desc - Описание
-         * @param {function} onSuccess - Функция, которая сработает после успеха (получит новый баланс)
-         */
+        // 🔥 НОВАЯ ФИЧА: Кнопка авторизации через Телеграм
+        createLoginButton(containerId, botUsername, onAuthCallback) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            // Телега требует глобальную функцию для колбэка
+            window.onTelegramSDKAuth = (user) => {
+                this.setUser(user.id);
+                if (onAuthCallback) onAuthCallback(user);
+            };
+
+            const script = document.createElement('script');
+            script.async = true;
+            script.src = 'https://telegram.org/js/telegram-widget.js?22';
+            // Твой юзернейм бота (без @)
+            script.setAttribute('data-telegram-login', botUsername);
+            script.setAttribute('data-size', 'large');
+            script.setAttribute('data-onauth', 'onTelegramSDKAuth(user)');
+            script.setAttribute('data-request-access', 'write');
+
+            container.appendChild(script);
+        }
+
         createPayButton(containerId, amount, desc, onSuccess) {
             const container = document.getElementById(containerId);
             if (!container) return;
@@ -87,8 +102,6 @@
                         btn.innerText = "Оплачено";
                         btn.style.background = "#28a745";
                         
-                        // 🔥 ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ 🔥
-                        // Если передали функцию onSuccess, вызываем её с новым балансом
                         if (onSuccess && typeof onSuccess === 'function') {
                             onSuccess(res.new_balance);
                         }
@@ -106,10 +119,7 @@
             
             container.appendChild(btn);
         }
-
     }
 
-    // Экспортируем экземпляр класса
     window.StudentCoins = new StudentCoinsSDK();
-
 })(window);

@@ -432,6 +432,25 @@
 
 <body>
 
+    <div id="lock-screen"
+        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--tg-bg); z-index: 99999; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; transition: opacity 0.3s ease;">
+
+        <div style="font-size: 60px; margin-bottom: 20px;">🎓</div>
+        <h2 id="auth-title" style="margin-bottom: 10px;">Вход в систему</h2>
+        <p id="auth-subtitle" style="color: var(--tg-hint); font-size: 14px; text-align: center; margin-bottom: 20px;">
+            Загрузка...</p>
+
+        <!-- Поле для Студенческого (Скрыто по умолчанию) -->
+        <input type="text" id="student-id-input" placeholder="Номер студенческого билета"
+            style="display: none; font-size: 16px; text-align: center; width: 250px; padding: 12px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.1); background: var(--tg-sec-bg); color: var(--tg-text); margin-bottom: 10px;">
+
+        <!-- Поле Пароля (Строка) -->
+        <input type="password" id="password-input" placeholder="Пароль (до 20 символов)" maxlength="20"
+            style="font-size: 16px; text-align: center; width: 250px; padding: 12px; border-radius: 12px; border: 1px solid var(--tg-btn); outline: none; background: var(--tg-sec-bg); color: var(--tg-text); margin-bottom: 20px;">
+
+        <button id="auth-btn" class="btn" style="width: 250px;" onclick="handleAuthSubmit()">Войти</button>
+    </div>
+
     <!-- ПРОФИЛЬ -->
     <div id="main" class="content-section active">
         <div class="card balance-card">
@@ -607,22 +626,22 @@
 
     <!-- АДМИНКА -->
     <div id="admin" class="content-section role-protected">
-    <h3>Администрирование</h3>
-    <div class="card">
-        <div id="admin-stats">Загрузка...</div>
+        <h3>Администрирование</h3>
+        <div class="card">
+            <div id="admin-stats">Загрузка...</div>
+        </div>
+        <div class="card" style="margin-top:20px;">
+            <h4>Начислить баллы</h4>
+            <input type="number" id="grant-target-id" class="input" placeholder="Telegram ID получателя">
+            <input type="number" id="grant-amount" class="input" placeholder="Сумма">
+            <button class="btn" onclick="grantPoints()">Начислить</button>
+        </div>
+        <div class="card" style="margin-top:20px; border-color:#f44336;">
+            <h4 style="color:#f44336;">Опасная зона</h4>
+            <p style="font-size:12px; margin-bottom:10px;">...</p>
+            <button class="btn btn-danger" onclick="resetAllData()">Полное обнуление года</button>
+        </div>
     </div>
-    <div class="card" style="margin-top:20px;">
-        <h4>Начислить баллы</h4>
-        <input type="number" id="grant-target-id" class="input" placeholder="Telegram ID получателя">
-        <input type="number" id="grant-amount" class="input" placeholder="Сумма">
-        <button class="btn" onclick="grantPoints()">Начислить</button>
-    </div>
-    <div class="card" style="margin-top:20px; border-color:#f44336;">
-        <h4 style="color:#f44336;">Опасная зона</h4>
-        <p style="font-size:12px; margin-bottom:10px;">...</p>
-        <button class="btn btn-danger" onclick="resetAllData()">Полное обнуление года</button>
-    </div>
-</div>
 
     <!-- НИЖНЕЕ МЕНЮ -->
     <div class="tabs">
@@ -663,20 +682,126 @@
         const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
         if (tg) tg.expand();
 
-        const userId = new URLSearchParams(window.location.search).get('user_id');
+        // 1. Сначала пытаемся вытащить ID из ссылки (полезно для твоих тестов в браузере)
+        let userId = new URLSearchParams(window.location.search).get('user_id');
+
+        // 2. Если в ссылке нет, но мы сидим в Телеге (Mini App) - тянем ID из самой Телеге!
+        if (!userId && tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            userId = tg.initDataUnsafe.user.id;
+        }
+
         let currentUserRole = 'student';
         let myChart = null;
         let currentMerchId = null;
 
+        let isRegistrationMode = false;
+
         // --- INIT ---
         function init() {
-            if (!userId) return alert('No user_id');
+            if (!userId) return alert('Ошибка: Нет Telegram ID');
+
             fetch(`/api/user/${userId}`).then(r => r.json()).then(u => {
-                document.getElementById('balance-display').innerText = u.current_points;
-                currentUserRole = u.role || 'student';
-                applyRoleRights();
-                updateAllData();
+
+                // ЛОГИКА ВХОДА / РЕГИСТРАЦИИ
+                if (u && u.has_pin) {
+                    // Юзер есть в базе и у него есть пароль -> РЕЖИМ ВХОДА
+                    isRegistrationMode = false;
+                    document.getElementById('auth-title').innerText = "С возвращением!";
+                    document.getElementById('auth-subtitle').innerText = "Введите ваш пароль";
+                    document.getElementById('student-id-input').style.display = 'none'; // Прячем студак
+                    document.getElementById('auth-btn').innerText = "Войти";
+
+                    currentUserRole = u.role || 'student';
+                    document.getElementById('balance-display').innerText = u.current_points;
+                    applyRoleRights();
+                } else {
+                    // Юзера НЕТ в базе (или нет пароля) -> РЕЖИМ РЕГИСТРАЦИИ
+                    isRegistrationMode = true;
+                    document.getElementById('auth-title').innerText = "Регистрация";
+                    document.getElementById('auth-subtitle').innerText = "Привяжите студенческий билет";
+                    document.getElementById('student-id-input').style.display = 'block'; // Показываем студак
+                    document.getElementById('auth-btn').innerText = "Зарегистрироваться";
+                }
+            }).catch(() => {
+                // Если ручка отдала 404 (юзер не найден) -> Тоже идем в регу
+                isRegistrationMode = true;
+                document.getElementById('auth-title').innerText = "Регистрация";
+                document.getElementById('auth-subtitle').innerText = "Добро пожаловать!";
+                document.getElementById('student-id-input').style.display = 'block';
+                document.getElementById('auth-btn').innerText = "Зарегистрироваться";
             });
+        }
+
+        // --- ОБРАБОТКА КНОПКИ ---
+        function handleAuthSubmit() {
+            const password = document.getElementById('password-input').value;
+            const studentId = document.getElementById('student-id-input').value;
+
+            if (!password || password.length < 4) {
+                return uiAlert("Пароль должен быть не короче 4 символов!");
+            }
+
+            if (isRegistrationMode) {
+                // РЕГИСТРАЦИЯ
+                if (!studentId) return uiAlert("Введите номер студенческого билета!");
+
+                // Достаем имя и фамилию из Телеграма (если они там есть)
+                let tFirstName = tg?.initDataUnsafe?.user?.first_name || 'Студент';
+                let tLastName = tg?.initDataUnsafe?.user?.last_name || 'Без фамилии';
+
+                fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        student_id: studentId,
+                        password: password,
+                        first_name: tFirstName, // Прокидываем на бэк
+                        last_name: tLastName    // Прокидываем на бэк
+                    })
+                })
+
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.success) {
+                            uiAlert("Регистрация успешна!");
+                            unlockApp(); // Разблокируем экран
+                            // Так как юзер только создан, нужно дернуть его данные с бэка заново
+                            fetch(`/api/user/${userId}`).then(r => r.json()).then(u => {
+                                currentUserRole = u.role || 'student';
+                                document.getElementById('balance-display').innerText = u.current_points;
+                                applyRoleRights();
+                                updateAllData();
+                            });
+                        } else {
+                            uiAlert(res.message);
+                        }
+                    });
+
+            } else {
+                // ВХОД (Проверка пароля)
+                fetch('/api/pin/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, pin: password })
+                })
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.success) {
+                            unlockApp();
+                            updateAllData();
+                        } else {
+                            uiAlert("Неверный пароль!");
+                            document.getElementById('password-input').value = '';
+                        }
+                    });
+            }
+        }
+
+        function unlockApp() {
+            const lockScreen = document.getElementById('lock-screen');
+            lockScreen.style.opacity = '0';
+            setTimeout(() => lockScreen.remove(), 300);
         }
 
         function applyRoleRights() {
@@ -1220,58 +1345,58 @@
             });
         }
         // Функция для полного обнуления
-function resetAllData() {
-    uiConfirm('Вы уверены? Все данные (история, заказы, аукционы, балансы) будут безвозвратно удалены. Начать новый учебный год?', (ok) => {
-        if (!ok) return;
-        fetch('/api/admin/reset_all_data', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({user_id: userId})
-        })
-        .then(r => r.json())
-        .then(res => {
-            uiAlert(res.message);
-            if (res.success) {
-                // После обнуления переключаемся на главную и обновляем все данные
-                showTab('main', document.querySelector('.tab'));
-                updateAllData();
-                loadMerch();
-            }
-        })
-        .catch(err => uiAlert('Ошибка: ' + err));
-    });
-}
-
-// Функция для ручного начисления баллов
-function grantPoints() {
-    const targetId = document.getElementById('grant-target-id').value;
-    const amount = document.getElementById('grant-amount').value;
-    if (!targetId || !amount || amount <= 0) {
-        uiAlert('Введите корректные данные');
-        return;
-    }
-    fetch('/api/admin/grant_points', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            admin_id: userId,
-            target_user_id: parseInt(targetId),
-            amount: parseInt(amount)
-        })
-    })
-    .then(r => r.json())
-    .then(res => {
-        uiAlert(res.message);
-        if (res.success) {
-            // Очистить поля ввода после успеха
-            document.getElementById('grant-target-id').value = '';
-            document.getElementById('grant-amount').value = '';
-            // Можно обновить баланс текущего пользователя, если он начислил себе
-            updateAllData();
+        function resetAllData() {
+            uiConfirm('Вы уверены? Все данные (история, заказы, аукционы, балансы) будут безвозвратно удалены. Начать новый учебный год?', (ok) => {
+                if (!ok) return;
+                fetch('/api/admin/reset_all_data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId })
+                })
+                    .then(r => r.json())
+                    .then(res => {
+                        uiAlert(res.message);
+                        if (res.success) {
+                            // После обнуления переключаемся на главную и обновляем все данные
+                            showTab('main', document.querySelector('.tab'));
+                            updateAllData();
+                            loadMerch();
+                        }
+                    })
+                    .catch(err => uiAlert('Ошибка: ' + err));
+            });
         }
-    })
-    .catch(err => uiAlert('Ошибка: ' + err));
-}
+
+        // Функция для ручного начисления баллов
+        function grantPoints() {
+            const targetId = document.getElementById('grant-target-id').value;
+            const amount = document.getElementById('grant-amount').value;
+            if (!targetId || !amount || amount <= 0) {
+                uiAlert('Введите корректные данные');
+                return;
+            }
+            fetch('/api/admin/grant_points', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    admin_id: userId,
+                    target_user_id: parseInt(targetId),
+                    amount: parseInt(amount)
+                })
+            })
+                .then(r => r.json())
+                .then(res => {
+                    uiAlert(res.message);
+                    if (res.success) {
+                        // Очистить поля ввода после успеха
+                        document.getElementById('grant-target-id').value = '';
+                        document.getElementById('grant-amount').value = '';
+                        // Можно обновить баланс текущего пользователя, если он начислил себе
+                        updateAllData();
+                    }
+                })
+                .catch(err => uiAlert('Ошибка: ' + err));
+        }
 
         // --- ACTIONS (FORMS) ---
 

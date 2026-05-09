@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Детали лота</title>
+</head>
+
+<body style="font-family: sans-serif; background: #f0f0f0; margin: 0; padding-bottom: 30px;">
+
+    <!-- Шапка-возврат -->
+    <div
+        style="background: white; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100;">
+        <button onclick="window.history.back()"
+            style="background: #e0e0e0; border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer;">
+            Назад к лотам
+        </button>
+    </div>
+
+    <!-- Карточка лота -->
+    <div
+        style="background: white; margin: 15px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        <!-- Дефолтная картинка или из базы -->
+        <img src="{{ auction.image_url if auction.image_url else 'https://abali.ru/vektornyj-gerb-mgtu-imeni-n-e-baumana/' }}"
+            alt="Лот" style="width: 100%; height: 200px; object-fit: cover;">
+
+        <div style="padding: 20px;">
+            <h2 style="margin: 0 0 10px 0;">{{ auction.title }}</h2>
+            <p style="color: #666; font-size: 14px; margin-bottom: 20px;">{{ auction.description }}</p>
+
+            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; border-left: 4px solid #ff9800;">
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #555;">Текущая цена:</span>
+                    <span style="font-size: 20px; font-weight: bold; color: #ff9800;">
+                        {{ auction.current_bid if auction.current_bid > 0 else auction.start_price }} STC
+                    </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                    <span style="color: #555;">Закончится:</span>
+                    <span style="color: red; font-weight: bold;">{{ auction.end_time_str }}</span>
+                </div>
+            </div>
+
+            <!-- БЛОК СТАВКИ -->
+            {% if auction.status == 'open' %}
+
+            <!-- 🔥 ЕСЛИ СТУДЕНТ - РИСУЕМ ФОРМУ 🔥 -->
+            {% if role == 'student' %}
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                <h3 style="margin-top: 0;">Сделать ставку (min. {{ auction.min_bid }} STC)</h3>
+                <div style="display: flex; gap: 10px;">
+                    <input type="number" id="bid-amount" placeholder="Твоя ставка..." min="{{ auction.min_bid }}"
+                        style="flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px;">
+                    <button onclick="placeBid()"
+                        style="background: #4caf50; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">
+                        ПОСТАВИТЬ
+                    </button>
+                </div>
+            </div>
+
+            <!-- 🔥 ЕСЛИ СТУДСОВЕТ/АДМИН - РИСУЕМ ЗАГЛУШКУ 🔥 -->
+            {% else %}
+            <div
+                style="margin-top: 20px; padding: 15px; background: #fff3e0; border: 1px dashed #ff9800; text-align: center; border-radius: 8px; font-weight: 600; color: #ff9800;">
+                Организаторы торгов не могут участвовать в аукционе
+            </div>
+            {% endif %}
+
+            {% else %}
+            <!-- Если аукцион закрыт (время вышло) -->
+            <div
+                style="margin-top: 20px; padding: 15px; background: #e0e0e0; text-align: center; border-radius: 8px; font-weight: bold;">
+                АУКЦИОН ЗАВЕРШЁН
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+
+    <!-- ИСТОРИЯ СТАВОК -->
+    <div style="margin: 20px 15px;">
+        <h3 style="margin-bottom: 10px;">История ставок</h3>
+
+        <div style="background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+            {% if auction.bids_history %}
+            <ul style="list-style: none; padding: 0; margin: 0;">
+                {% for bid in auction.bids_history %}
+                <!-- Первый (самый жирный) бид подсвечиваем зелёным -->
+                <li
+                    style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; {% if loop.first %}font-weight: bold; color: #4caf50;{% endif %}">
+                    <div>
+                        {% if loop.first %}{% endif %}
+                        {{ bid.first_name }} {{ bid.last_name or '' }}
+                        <span style="font-size: 11px; color: #999; margin-left: 8px;">{{ bid.time_str }}</span>
+                    </div>
+                    <div>{{ bid.amount }} STC</div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div style="text-align: center; color: #888; padding: 20px;">
+                Ставок пока нет. Будь первым!
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Скрипт отправки ставки -->
+    <script>
+        function placeBid() {
+            const amountInput = document.getElementById('bid-amount').value;
+            const auctionId = '{{ auction.id }}';
+            const userId = '{{ user_id }}';
+
+            // Защита от дурака
+            if (!amountInput) {
+                alert("Введи сумму ставки!");
+                return;
+            }
+
+            fetch('/api/auctions/bid', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    auction_id: auctionId,
+                    user_id: userId,
+                    bid_amount: parseInt(amountInput)
+                })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message);
+                        window.location.reload(); // Перезагружаем, чтобы обновить текущую цену и хистори!
+                    } else {
+                        // Выводим твой вежливый (или не очень) посыл нахуй
+                        alert("Ошибка: " + data.message);
+                    }
+                })
+                .catch(err => console.error("Ошибка сети:", err));
+        }
+    </script>
+</body>
+
+</html>
